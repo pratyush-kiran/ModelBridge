@@ -19,6 +19,7 @@ def executable_for(model):
     if not path and os.name == "nt":
         candidates = (
             os.path.expanduser("~/.local/bin/" + name),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WinGet", "Links", name),
             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs",
                          "OpenAI", "Codex", "bin", name) if model == "codex" else "",
         )

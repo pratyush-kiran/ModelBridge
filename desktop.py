@@ -15,9 +15,9 @@ from bridge import HTTPServer, Handler, QUIET_PROCESS, ask, executable_for, subs
 from keys import KeyStore
 from providers import discover
 
-BG, PANEL, SIDEBAR = "#0d1422", "#151f31", "#101929"
-TEXT, MUTED, BORDER = "#f3f6ff", "#a5b3cb", "#2a3a54"
-MINT, BLUE, DANGER = "#83efc8", "#9ab0ff", "#ff9db1"
+BG, PANEL, SIDEBAR = "#1e1e1e", "#252526", "#181818"
+TEXT, MUTED, BORDER = "#cccccc", "#969696", "#3c3c3c"
+MINT, BLUE, DANGER = "#007acc", "#4fc1ff", "#ff9db1"
 FONT = "Segoe UI"
 ICON = Path(__file__).resolve().parent / "assets" / "model-bridge.ico"
 PROVIDERS = {
@@ -30,14 +30,14 @@ class Button(tk.Label):
     """A keyboard-operable button with a short hover transition."""
 
     def __init__(self, parent, title, command, primary=False, nav=False):
-        self.normal = MINT if primary else (SIDEBAR if nav else "#22324b")
-        self.hover = "#b4ffe6" if primary else "#334974"
+        self.normal = MINT if primary else (SIDEBAR if nav else "#333333")
+        self.hover = "#168cce" if primary else "#444444"
         self.command = command
         self.enabled = True
         self.active = False
         self.transition = 0
-        super().__init__(parent, text=title, bg=self.normal, fg=BG if primary else TEXT,
-                         font=(FONT, 10, "bold"), padx=13, pady=8, cursor="hand2",
+        super().__init__(parent, text=title, bg=self.normal, fg="#ffffff" if primary else TEXT,
+                         font=(FONT, 10, "bold"), padx=11, pady=5, cursor="hand2",
                          takefocus=True, anchor="w" if nav else "center",
                          highlightthickness=1, highlightbackground=self.normal,
                          highlightcolor=BLUE)
@@ -47,7 +47,7 @@ class Button(tk.Label):
             self.bind(event, self.invoke)
 
     def base(self):
-        return "#283c5f" if self.active else self.normal
+        return "#37373d" if self.active else self.normal
 
     def invoke(self, _=None):
         if self.enabled:
@@ -56,7 +56,7 @@ class Button(tk.Label):
     def state(self, enabled):
         self.enabled = bool(enabled)
         self.configure(cursor="hand2" if self.enabled else "arrow",
-                       fg=(BG if self.normal == MINT else TEXT) if self.enabled else "#7986a0",
+                       fg=("#ffffff" if self.normal == MINT else TEXT) if self.enabled else "#7986a0",
                        takefocus=self.enabled)
         self.transition += 1
         self.configure(bg=self.base())
@@ -84,7 +84,7 @@ def label(parent, value="", size=11, color=TEXT, bold=False, **options):
                     bg=parent.cget("bg"), fg=color, anchor="w", **options)
 
 
-def card(parent, padding=18):
+def card(parent, padding=14):
     outer = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
     content = tk.Frame(outer, bg=PANEL, padx=padding, pady=padding)
     content.pack(fill="both", expand=True)
@@ -138,27 +138,25 @@ class Desktop:
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure("Treeview", background=PANEL, fieldbackground=PANEL, foreground=TEXT,
-                        rowheight=36, font=(FONT, 10), relief="flat", borderwidth=0)
-        style.configure("Treeview.Heading", background="#202e46", foreground=MUTED,
+                        rowheight=30, font=(FONT, 10), relief="flat", borderwidth=0)
+        style.configure("Treeview.Heading", background="#252526", foreground=MUTED,
                         font=(FONT, 10, "bold"), padding=(8, 8), relief="flat")
-        style.map("Treeview", background=[("selected", "#314a73")], foreground=[("selected", TEXT)])
-        style.map("Treeview.Heading", background=[("active", "#263853")])
+        style.map("Treeview", background=[("selected", "#094771")], foreground=[("selected", TEXT)])
+        style.map("Treeview.Heading", background=[("active", "#333333")])
         style.configure("Vertical.TScrollbar", background=BORDER, troughcolor=PANEL,
                         bordercolor=PANEL, arrowcolor=MUTED)
         style.configure("Horizontal.TProgressbar", background=MINT, troughcolor=BORDER,
                         bordercolor=BORDER, lightcolor=MINT, darkcolor=MINT)
 
     def build_shell(self):
-        rail = tk.Frame(self.root, bg=SIDEBAR, padx=16, pady=22, width=202)
+        rail = tk.Frame(self.root, bg=SIDEBAR, padx=16, pady=22, width=220)
         rail.pack(side="left", fill="y")
         rail.pack_propagate(False)
         brand = tk.Frame(rail, bg=SIDEBAR)
         brand.pack(fill="x", pady=(0, 30))
-        glyph = tk.Canvas(brand, width=34, height=34, bg=SIDEBAR, highlightthickness=0)
-        glyph.pack(side="left", padx=(2, 8))
-        glyph.create_line(5, 25, 5, 16, 11, 10, 23, 10, 29, 16, 29, 25, fill=MINT, width=4)
-        glyph.create_line(5, 21, 29, 21, fill=BLUE, width=3)
-        label(brand, "Model Bridge", 14, bold=True).pack(side="left")
+        self.logo = tk.PhotoImage(file=str(ICON.parent / "logo-header.png"))
+        tk.Label(brand, image=self.logo, bg=SIDEBAR).pack(side="left", padx=(0, 8))
+        label(brand, "Model Bridge", 12, bold=True).pack(side="left")
         self.nav = {}
         for name in ("Overview", "Models", "API keys"):
             button = Button(rail, name, lambda name=name: self.navigate(name), nav=True)
@@ -183,7 +181,7 @@ class Desktop:
     def page(self, name, title, description):
         page = tk.Frame(self.host, bg=BG)
         self.pages[name] = page
-        label(page, title, 27, bold=True).pack(fill="x")
+        label(page, title, 20, bold=True).pack(fill="x")
         label(page, description, 11, MUTED).pack(fill="x", pady=(3, 18))
         return page
 
@@ -207,12 +205,12 @@ class Desktop:
             outer.grid(row=0, column=column, sticky="nsew", padx=(0, 7) if column == 0 else (7, 0))
             header = tk.Frame(inner, bg=PANEL)
             header.pack(fill="x")
-            badge = tk.Label(header, text=initials, width=4, height=2, bg="#263854",
+            badge = tk.Label(header, text=initials, width=4, height=2, bg="#333333",
                              fg=MINT if provider == "codex" else "#ffc1a1", font=(FONT, 9, "bold"))
             badge.pack(side="left", padx=(0, 10))
             label(header, name, 16, bold=True).pack(side="left")
             state = label(inner, "Checking connection…", 11, MUTED,
-                          wraplength=245, height=2, justify="left")
+                          wraplength=245, height=3, justify="left")
             state.pack(fill="x", pady=(8, 10))
             button = Button(inner, "Connect", lambda provider=provider: self.connect(provider))
             button.pack(anchor="w")
@@ -240,7 +238,7 @@ class Desktop:
                         font=("Cascadia Mono" if mono else FONT, 10),
                         bg=SIDEBAR, readonlybackground=SIDEBAR, fg=TEXT, insertbackground=TEXT,
                         relief="flat", highlightthickness=1, highlightbackground=BORDER,
-                        highlightcolor=BLUE, selectbackground="#314a73")
+                        highlightcolor=BLUE, selectbackground="#094771")
 
     def table(self, parent, columns):
         frame, inner = card(parent, padding=1)
@@ -250,7 +248,7 @@ class Desktop:
         for key, title, width in columns:
             tree.heading(key, text=title, anchor="w")
             tree.column(key, width=width, minwidth=55, anchor="w")
-        tree.tag_configure("alternate", background="#19253a")
+        tree.tag_configure("alternate", background="#222222")
         scroll = ttk.Scrollbar(inner, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
@@ -414,18 +412,36 @@ class Desktop:
         self.render_keys()
         self.notify("API key revoked.")
 
+    def install(self, provider):
+        package = {"codex": "OpenAI.Codex", "claude": "Anthropic.ClaudeCode"}[provider]
+        dialog, body = self.modal("Install " + PROVIDERS[provider][0],
+            "Windows will install the CLI in a terminal. Complete any installer prompts, "
+            "then return here to sign in.")
+        def launch():
+            script = (f"winget install --id {package} --exact --source winget; "
+                      "$result = $LASTEXITCODE; if ($result -ne 0) { "
+                      "Read-Host 'Installation failed. Press Enter to return' }; exit $result")
+            try:
+                self.sign_in = subprocess.Popen(
+                    ["powershell.exe", "-NoProfile", "-Command", script],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+            except OSError as exc:
+                messagebox.showerror("Could not open installer", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.update_buttons()
+            process = self.sign_in
+            def wait():
+                self.events.put(("installed", provider, process.wait()))
+            threading.Thread(target=wait, daemon=True).start()
+        Button(body, "Install CLI", launch, primary=True).pack(side="left")
+        Button(body, "Cancel", dialog.destroy).pack(side="right")
+
     def connect(self, provider):
         name, _, docs = PROVIDERS[provider]
         executable = executable_for(provider)
         if not executable:
-            description = ("Install the native Claude Code CLI, then return here to sign in."
-                           if provider == "claude" else "Install the Codex CLI, then return here to sign in.")
-            dialog, body = self.modal(f"Set up {name}", description)
-            Button(body, "Open setup guide", lambda: webbrowser.open(docs), primary=True).pack(side="left")
-            def check():
-                dialog.destroy()
-                self.connect(provider)
-            Button(body, "Check again", check).pack(side="right")
+            self.install(provider)
             return
         dialog, body = self.modal(f"Connect {name}", f"Continue to the official {name} sign-in. "
             "A sign-in window will open. Complete the instructions there and return to Model Bridge.")
@@ -501,7 +517,7 @@ class Desktop:
                 self.account[identifier] = status
                 state, button = self.provider_ui[identifier]
                 state.config(text=status, fg=MINT if models else MUTED)
-                button.config(text="Reconnect" if models else ("Set up CLI" if "not found" in status else "Sign in"))
+                button.config(text="Reconnect" if models else ("Install CLI" if "not found" in status else "Sign in"))
                 self.models.update(models)
                 self.pending -= 1
                 if not self.pending:
@@ -515,6 +531,12 @@ class Desktop:
                 self.notify(f"{identifier} " + ("responded successfully." if value else "did not complete."),
                             MINT if value else DANGER)
                 self.render_models()
+            elif event == "installed":
+                self.sign_in = None
+                self.refresh()
+                self.notify("Installation finished. Select Sign in to connect." if value == 0
+                            else "Installation failed. Try Install CLI again.",
+                            MINT if value == 0 else DANGER)
             elif event == "stopped":
                 self.server = None
                 self.stopping = False

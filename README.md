@@ -1,8 +1,10 @@
+![Model Bridge](assets/logo.png)
+
 # Model Bridge
 
 Model Bridge is a Windows desktop app that exposes an OpenAI-compatible text endpoint on your PC. It builds its model catalog from the installed Codex and Claude Code CLIs and uses the provider sign-ins stored by those CLIs.
 
-1. Open **Overview** and connect ChatGPT or Claude. If the CLI is missing, the app links to its setup guide.
+1. Open **Overview** and connect ChatGPT or Claude. If the CLI is missing, choose Install CLI to open the Windows installer in a terminal.
 2. Create a named key under **API keys** and copy it into your client. Only the key fingerprint is saved. Revoke the key to immediately block new requests using it.
 3. Start the API from **Overview** and copy the displayed URL. The app uses port 8765 when available and picks a free port otherwise.
 4. Select a model under **Models** and copy its API model ID. Test the model in the app to confirm access. The test uses one provider request.
