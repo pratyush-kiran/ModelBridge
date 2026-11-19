@@ -15,10 +15,11 @@ from bridge import HTTPServer, Handler, QUIET_PROCESS, ask, executable_for, subs
 from keys import KeyStore
 from providers import discover
 
-BG, PANEL, SIDEBAR = "#0c0c10", "#14141a", "#101015"
-TEXT, MUTED, BORDER = "#ededf2", "#8b8b99", "#25252e"
-ACCENT, ACCENT_HOVER, SURFACE, SURFACE_HOVER = "#6e62f6", "#8478ff", "#1c1c24", "#262630"
-MINT, BLUE, DANGER = "#3dd68c", "#a39bff", "#ff6b81"
+BG, PANEL, SIDEBAR = "#f6f6f8", "#ffffff", "#fbfbfc"
+TEXT, MUTED, BORDER = "#18181b", "#6b6b76", "#e5e5ea"
+ACCENT, ACCENT_HOVER, SURFACE, SURFACE_HOVER = "#5b4ff0", "#4a3ee0", "#ffffff", "#f2f2f5"
+NAV_ACTIVE, SELECT, ROW_HOVER, DISABLED = "#efedfe", "#efedfe", "#f8f8fa", "#b9b9c2"
+MINT, BLUE, DANGER = "#15a35a", "#5b4ff0", "#dc3c42"
 FONT = "Segoe UI Variable Text"
 DISPLAY = "Segoe UI Variable Display"
 ICON = Path(__file__).resolve().parent / "assets" / "model-bridge.ico"
@@ -54,7 +55,7 @@ class Button(tk.Label):
             self.bind(event, self.invoke)
 
     def base(self):
-        return SURFACE if self.active else self.normal
+        return NAV_ACTIVE if self.active else self.normal
 
     def invoke(self, _=None):
         if self.enabled:
@@ -63,7 +64,7 @@ class Button(tk.Label):
     def state(self, enabled):
         self.enabled = bool(enabled)
         self.configure(cursor="hand2" if self.enabled else "arrow",
-                       fg=("#ffffff" if self.primary else TEXT) if self.enabled else "#5a5a68",
+                       fg=("#ffffff" if self.primary else TEXT) if self.enabled else DISABLED,
                        takefocus=self.enabled)
         self.transition += 1
         self.configure(bg=self.base())
@@ -128,8 +129,8 @@ TOUR_FLAG = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelBridge" / 
 
 def label(parent, value="", size=11, color=TEXT, bold=False, **options):
     family = DISPLAY if size >= 15 else FONT
-    return tk.Label(parent, text=value, font=(family, size, "bold" if bold else "normal"),
-                    bg=parent.cget("bg"), fg=color, **{"anchor": "w", **options})
+    options = {"anchor": "w", "font": (family, size, "bold" if bold else "normal"), **options}
+    return tk.Label(parent, text=value, bg=parent.cget("bg"), fg=color, **options)
 
 
 def card(parent, padding=18):
@@ -157,6 +158,7 @@ class Desktop:
         root.title("Model Bridge")
         self.icons = {path.stem: tk.PhotoImage(master=root, file=str(path))
                       for path in (ICON.parent / "icons").glob("*.png")}
+        self.icons["blank"] = tk.PhotoImage(master=root, width=18, height=18)
         root.geometry("1120x720")
         root.minsize(940, 620)
         root.configure(bg=BG)
@@ -165,7 +167,7 @@ class Desktop:
             root.iconbitmap(default=str(ICON))
         if os.name == "nt":
             try:
-                enabled = ctypes.c_int(1)
+                enabled = ctypes.c_int(0)
                 get_parent = ctypes.windll.user32.GetParent
                 get_parent.argtypes = (ctypes.c_void_p,)
                 get_parent.restype = ctypes.c_void_p
@@ -194,7 +196,7 @@ class Desktop:
                         rowheight=36, font=(FONT, 10), relief="flat", borderwidth=0)
         style.configure("Treeview.Heading", background=PANEL, foreground=MUTED,
                         font=(FONT, 9, "bold"), padding=(10, 10), relief="flat", borderwidth=0)
-        style.map("Treeview", background=[("selected", "#262145")], foreground=[("selected", TEXT)])
+        style.map("Treeview", background=[("selected", SELECT)], foreground=[("selected", TEXT)])
         style.map("Treeview.Heading", background=[("active", PANEL)])
         style.layout("Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
         style.configure("Vertical.TScrollbar", background=SURFACE, gripcount=0, lightcolor=SURFACE, darkcolor=SURFACE, troughcolor=PANEL,
@@ -216,7 +218,7 @@ class Desktop:
         words.pack(side="left")
         label(words, "Model Bridge", 12, bold=True).pack(fill="x")
         label(words, "Local AI gateway", 9, MUTED).pack(fill="x")
-        label(rail, "WORKSPACE", 8, "#5d5d6b", bold=True).pack(fill="x", padx=12, pady=(0, 6))
+        label(rail, "WORKSPACE", 8, "#9a9aa6", bold=True).pack(fill="x", padx=12, pady=(0, 6))
         self.nav = {}
         for name, icon in (("Overview", "overview"), ("Models", "models"), ("API keys", "keys")):
             button = Button(rail, f"  {name}", lambda name=name: self.navigate(name), nav=True,
@@ -232,6 +234,7 @@ class Desktop:
         self.dot_shape = self.dot.create_oval(2, 5, 10, 13, fill=MUTED, outline="")
         self.rail_status = label(status, "API stopped", 10, MUTED)
         self.rail_status.pack(side="left")
+        label(rail, "v1.1  \u00b7  Open source (MIT)", 8, "#9a9aa6").pack(side="bottom", fill="x", padx=12, pady=(10, 0))
         help_button = Button(rail, "  Getting started", self.tour, nav=True, image=self.icons["help"])
         help_button.configure(fg=MUTED)
         help_button.pack(side="bottom", fill="x", pady=(0, 10))
@@ -258,13 +261,14 @@ class Desktop:
         for key, button in self.nav.items():
             button.active = key == name
             button.transition += 1
-            button.configure(bg=button.base(), fg=TEXT if key == name else MUTED,
+            button.configure(bg=button.base(), fg=ACCENT if key == name else MUTED,
                              image=self.icons[button.icon + ("-active" if key == name else "")])
 
     def build_overview(self):
         page = self.page("Overview", "Overview", "Connect your accounts and start the API on this PC.")
         grid = tk.Frame(page, bg=BG)
         grid.pack(fill="x")
+        self.provider_grid = grid
         self.provider_ui = {}
         for column, (provider, (name, initials, _)) in enumerate(PROVIDERS.items()):
             grid.columnconfigure(column, weight=1, uniform="provider")
@@ -307,7 +311,7 @@ class Desktop:
                         font=("Cascadia Mono" if mono else FONT, 10),
                         bg=BG, readonlybackground=BG, fg=TEXT, insertbackground=TEXT,
                         relief="flat", highlightthickness=1, highlightbackground=BORDER,
-                        highlightcolor=ACCENT, selectbackground="#3a3380")
+                        highlightcolor=ACCENT, selectbackground="#d9d5fd", selectforeground=TEXT)
 
     def empty_state(self, host, icon, title, text, action=None, command=None):
         """A centred fallback panel placed over a table when it has nothing to show."""
@@ -335,12 +339,13 @@ class Desktop:
         for key, title, width in columns:
             tree.heading(key, text=title, anchor="w")
             tree.column(key, width=width, minwidth=55, anchor="w")
-        tree.tag_configure("alternate", background="#17171e")
+        tree.tag_configure("alternate", background="#fafafb")
         scroll = ttk.Scrollbar(inner, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         tree.host = inner
+        tree.card = frame
         return tree
 
     def build_models(self):
@@ -378,23 +383,84 @@ class Desktop:
         self.key_caption = label(bar, "", 11, MUTED)
         self.key_caption.pack(side="left")
         Button(bar, "Create key", self.create_key, primary=True).pack(side="right")
-        self.key_tree = self.table(page, (("name", "Name", 220), ("key", "Key", 340),
-                                         ("created", "Created", 110)))
-        self.key_tree.bind("<<TreeviewSelect>>", lambda _: self.update_buttons())
-        self.key_tree.bind("<Double-1>", lambda _: self.view_key())
-        self.keys_empty = self.empty_state(self.key_tree.host, "empty-keys", "Create your first key",
+        self.keys_card, inner = card(page, padding=0)
+        self.keys_card.pack(fill="both", expand=True, pady=(8, 0))
+        header = tk.Frame(inner, bg=PANEL, padx=16, pady=10)
+        header.pack(fill="x")
+        self.key_columns(header)
+        for column, title in enumerate(("NAME", "KEY", "CREATED")):
+            label(header, title, 8, MUTED, bold=True).grid(row=0, column=column, sticky="w")
+        tk.Frame(inner, bg=BORDER, height=1).pack(fill="x")
+        self.key_rows = tk.Frame(inner, bg=PANEL)
+        self.key_rows.pack(fill="both", expand=True)
+        self.keys_empty = self.empty_state(inner, "empty-keys", "Create your first key",
             "Each app that uses Model Bridge gets its own key, so you can revoke one without "
             "touching the others.", "Create key", self.create_key)
         self.shown = set()
-        row = tk.Frame(page, bg=BG)
-        row.pack(fill="x", pady=(10, 0))
-        label(row, "Keys are encrypted for your Windows account.", 10, MUTED).pack(side="left")
-        self.revoke_button = Button(row, "Revoke", self.revoke_key)
-        self.revoke_button.pack(side="right")
-        self.copy_key_button = Button(row, "Copy key", self.copy_key)
-        self.copy_key_button.pack(side="right", padx=8)
-        self.view_key_button = Button(row, "Show key", self.view_key)
-        self.view_key_button.pack(side="right")
+        label(page, "Hover a key to show, copy or revoke it. Keys are encrypted for your Windows account.",
+              10, MUTED).pack(fill="x", pady=(10, 0))
+
+    @staticmethod
+    def key_columns(frame):
+        frame.columnconfigure(0, minsize=210)
+        frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, minsize=120)
+        frame.columnconfigure(3, minsize=112)
+
+    def icon_button(self, parent, icon, command, tip):
+        button = tk.Label(parent, image=self.icons[icon], bg=parent.cget("bg"), cursor="hand2",
+                          padx=6, pady=4)
+        button.bind("<Button-1>", lambda _: command())
+        button.bind("<Enter>", lambda _: (button.configure(bg=BORDER), self.status_tip(tip)))
+        button.bind("<Leave>", lambda _: (button.configure(bg=button.master.cget("bg")), self.status_tip("")))
+        return button
+
+    def status_tip(self, text):
+        self.key_tip.config(text=text) if hasattr(self, "key_tip") else None
+
+    def key_row(self, digest, record):
+        row = tk.Frame(self.key_rows, bg=PANEL, padx=16, pady=11)
+        row.pack(fill="x")
+        tk.Frame(self.key_rows, bg=BORDER, height=1).pack(fill="x")
+        self.key_columns(row)
+        label(row, record["name"], 10, bold=True).grid(row=0, column=0, sticky="w")
+        shown = digest in self.shown
+        label(row, self.key_text(digest, record), 10, TEXT if shown else MUTED,
+              font=("Cascadia Mono", 9)).grid(row=0, column=1, sticky="w", padx=(0, 12))
+        label(row, record["date"], 10, MUTED).grid(row=0, column=2, sticky="w")
+        actions = tk.Frame(row, bg=PANEL)
+        actions.grid(row=0, column=3, sticky="e")
+        if record.get("secret"):
+            self.icon_button(actions, "row-eye-off" if shown else "row-eye",
+                             lambda: self.view_key(digest), "Hide key" if shown else "Show key").pack(side="left")
+            self.icon_button(actions, "row-copy", lambda: self.copy_key(digest), "Copy key").pack(side="left", padx=2)
+        self.icon_button(actions, "row-trash", lambda: self.revoke_key(digest), "Revoke key").pack(side="left")
+        widgets = [row, actions] + list(row.winfo_children()) + list(actions.winfo_children())
+
+        def paint(color, visible):
+            for widget in widgets:
+                widget.configure(bg=color)
+            for button in actions.winfo_children():
+                button.configure(image=button.image_name if visible else self.icons["blank"])
+
+        for button in actions.winfo_children():
+            button.image_name = button.cget("image")
+        paint(PANEL, False)
+
+        def leave(_):
+            def check():
+                if not row.winfo_exists():
+                    return
+                x, y = row.winfo_pointerxy()
+                under = row.winfo_containing(x, y)
+                if under is None or not str(under).startswith(str(row)):
+                    paint(PANEL, False)
+            row.after(15, check)
+
+        for widget in widgets:
+            widget.bind("<Enter>", lambda _: paint(ROW_HOVER, True), add="+")
+            widget.bind("<Leave>", leave, add="+")
+        row.bind("<Double-1>", lambda _: self.view_key(digest))
 
     @staticmethod
     def selection(tree):
@@ -436,11 +502,10 @@ class Desktop:
         self.update_buttons()
 
     def render_keys(self):
-        self.key_tree.delete(*self.key_tree.get_children())
-        for index, (fingerprint, record) in enumerate(reversed(self.store.keys.items())):
-            self.key_tree.insert("", "end", iid=fingerprint,
-                values=(record["name"], self.key_text(fingerprint, record), record["date"]),
-                tags=("alternate",) if index % 2 else ())
+        for widget in self.key_rows.winfo_children():
+            widget.destroy()
+        for digest, record in reversed(self.store.keys.items()):
+            self.key_row(digest, record)
         count = len(self.store.keys)
         if count:
             self.keys_empty.place_forget()
@@ -456,12 +521,6 @@ class Desktop:
         model = self.selection(self.model_tree)
         self.test_button.state(model and not (self.pending or self.testing))
         self.copy_model_button.state(model)
-        key = self.selection(self.key_tree)
-        self.revoke_button.state(key)
-        viewable = bool(key) and bool(self.store.keys.get(key, {}).get("secret"))
-        self.view_key_button.state(viewable)
-        self.copy_key_button.state(viewable)
-        self.view_key_button.config(text="Hide key" if key in self.shown else "Show key")
         for _, button in self.provider_ui.values():
             button.state(not self.sign_in)
 
@@ -498,26 +557,38 @@ class Desktop:
         dialog.focus_set()
         return dialog, body
 
+    def tour_targets(self):
+        return {0: None, 1: self.provider_grid, 2: self.keys_card, 3: self.api_card,
+                4: self.model_tree.card}
+
     def tour(self, step=0):
-        if self.dialog and self.dialog.winfo_exists():
+        if getattr(self, "tour_window", None) and self.tour_window.winfo_exists():
             return
-        dialog = tk.Toplevel(self.root, bg=PANEL)
-        dialog.title("Getting started")
-        dialog.transient(self.root)
-        dialog.resizable(False, False)
-        if os.name == "nt":
-            try:
-                dialog.update_idletasks()
-                style_title_bar(window_handle(dialog))
-            except OSError:
-                pass
-        body = tk.Frame(dialog, bg=PANEL, padx=30, pady=26)
+        root = self.root
+        shades = []
+        for _ in range(4):
+            shade = tk.Toplevel(root, bg="#0b0b16")
+            shade.overrideredirect(True)
+            shade.transient(root)
+            shade.attributes("-alpha", 0.55)
+            shade.bind("<Button-1>", lambda _: dialog.focus_set())
+            shades.append(shade)
+        ring = tk.Toplevel(root, bg=ACCENT)
+        ring.overrideredirect(True)
+        ring.transient(root)
+        ring.attributes("-transparentcolor", "#010203")
+        tk.Frame(ring, bg="#010203").pack(fill="both", expand=True, padx=2, pady=2)
+        dialog = tk.Toplevel(root, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
+        dialog.overrideredirect(True)
+        dialog.transient(root)
+        self.tour_window = dialog
+        body = tk.Frame(dialog, bg=PANEL, padx=26, pady=22)
         body.pack(fill="both", expand=True)
         self.tour_logo = tk.PhotoImage(file=str(ICON.parent / "logo-header.png"))
         tk.Label(body, image=self.tour_logo, bg=PANEL).pack(anchor="w", pady=(0, 16))
         title = label(body, "", 18, bold=True)
         title.pack(fill="x")
-        text = label(body, "", 11, MUTED, wraplength=440, justify="left", height=4)
+        text = label(body, "", 11, MUTED, wraplength=400, justify="left", height=4)
         text.pack(fill="x", pady=(8, 20))
         footer = tk.Frame(body, bg=PANEL)
         footer.pack(fill="x")
@@ -531,7 +602,58 @@ class Desktop:
                 TOUR_FLAG.touch()
             except OSError:
                 pass
-            dialog.destroy()
+            root.unbind("<Configure>", binding)
+            for window in shades + [ring, dialog]:
+                window.destroy()
+            root.focus_force()
+
+        def place():
+            if not dialog.winfo_exists():
+                return
+            root.update_idletasks()
+            left, top = root.winfo_rootx(), root.winfo_rooty()
+            right, bottom = left + root.winfo_width(), top + root.winfo_height()
+            target = self.tour_targets().get(state["step"])
+            if target is None:
+                rect = None
+                boxes = [(left, top, right, bottom)]
+            else:
+                pad = 8
+                x0, y0 = target.winfo_rootx() - pad, target.winfo_rooty() - pad
+                x1, y1 = x0 + target.winfo_width() + 2 * pad, y0 + target.winfo_height() + 2 * pad
+                rect = (x0, y0, x1, y1)
+                boxes = [(left, top, right, y0), (left, y1, right, bottom),
+                         (left, y0, x0, y1), (x1, y0, right, y1)]
+            for shade, box in zip(shades, boxes + [None] * 4):
+                if box and box[2] > box[0] and box[3] > box[1]:
+                    shade.geometry(f"{box[2]-box[0]}x{box[3]-box[1]}+{box[0]}+{box[1]}")
+                    shade.deiconify()
+                    shade.lift()
+                else:
+                    shade.withdraw()
+            if rect:
+                ring.geometry(f"{rect[2]-rect[0]}x{rect[3]-rect[1]}+{rect[0]}+{rect[1]}")
+                ring.deiconify()
+                ring.lift()
+            else:
+                ring.withdraw()
+            dialog.update_idletasks()
+            width, height = dialog.winfo_reqwidth(), dialog.winfo_reqheight()
+            if rect is None:
+                x, y = (left + right - width) // 2, (top + bottom - height) // 2
+            else:
+                x = min(max(rect[0], left + 16), right - width - 16)
+                if rect[3] + 14 + height < bottom:
+                    y = rect[3] + 14
+                elif rect[1] - height - 14 > top:
+                    y = rect[1] - height - 14
+                else:
+                    x, y = right - width - 40, rect[3] - height - 24
+            dialog.withdraw()
+            dialog.geometry(f"{width}x{height}+{x}+{y}")
+            dialog.deiconify()
+            dialog.lift()
+            dialog.focus_force()
 
         def show():
             index = state["step"]
@@ -544,6 +666,7 @@ class Desktop:
             back.state(index > 0)
             following.config(text="Get started" if index == len(TOUR) - 1 else "Next")
             self.navigate({1: "Overview", 2: "API keys", 3: "Overview", 4: "Models"}.get(index, "Overview"))
+            dialog.after(30, place)
 
         def move(delta):
             if state["step"] + delta >= len(TOUR):
@@ -559,17 +682,12 @@ class Desktop:
         skip = label(footer, "Skip", 10, MUTED, cursor="hand2")
         skip.pack(side="right", padx=12)
         skip.bind("<Button-1>", lambda _: finish())
-        dialog.protocol("WM_DELETE_WINDOW", finish)
+        binding = root.bind("<Configure>", lambda event: dialog.after_idle(place)
+                            if event.widget is root else None, add="+")
         dialog.bind("<Escape>", lambda _: finish())
         dialog.bind("<Right>", lambda _: move(1))
         dialog.bind("<Left>", lambda _: move(-1))
         show()
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - dialog.winfo_width()) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dialog.winfo_height()) // 3
-        dialog.geometry(f"+{x}+{y}")
-        dialog.grab_set()
-        dialog.focus_set()
 
     def create_key(self):
         dialog, body = self.modal("Create local API key", "Give this key a name so you can identify the client later.")
@@ -613,16 +731,13 @@ class Desktop:
             return "mb_\u2022\u2022\u2022\u2022" + record["suffix"] + "   (older key, not viewable)"
         return "mb_" + "\u2022" * 12 + record["suffix"]
 
-    def view_key(self):
-        digest = self.selection(self.key_tree)
-        if not digest or not self.store.keys.get(digest, {}).get("secret"):
+    def view_key(self, digest):
+        if not self.store.keys.get(digest, {}).get("secret"):
             return
         self.shown ^= {digest}
         self.render_keys()
-        self.key_tree.selection_set(digest)
 
-    def copy_key(self):
-        digest = self.selection(self.key_tree)
+    def copy_key(self, digest):
         try:
             token = self.store.reveal(digest)
         except OSError:
@@ -632,8 +747,7 @@ class Desktop:
         else:
             self.notify("This key cannot be copied. Create a new key instead.", DANGER)
 
-    def revoke_key(self):
-        digest = self.selection(self.key_tree)
+    def revoke_key(self, digest):
         record = self.store.keys.get(digest)
         if not record or not messagebox.askyesno("Revoke API key",
                 f"Revoke “{record['name']}”? Clients using this key will lose access immediately.",
@@ -641,6 +755,7 @@ class Desktop:
             return
         try:
             self.store.revoke(digest)
+            self.shown.discard(digest)
         except OSError as exc:
             messagebox.showerror("Could not revoke key", str(exc), parent=self.root)
             return

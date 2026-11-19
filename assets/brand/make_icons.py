@@ -88,6 +88,21 @@ def line_icon(size, name, color):
         draw.arc((c - s * .12, s * .3, c + s * .12, s * .52), 180, 90, fill=color, width=w)
         draw.line([(c, s * .52), (c, s * .58)], fill=color, width=w)
         draw.ellipse((c - w * .7, s * .67, c + w * .7, s * .67 + w * 1.4), fill=color)
+    elif name in ("eye", "eye-off"):
+        c = s / 2
+        draw.arc((s * .06, s * .22, s * .94, s * 1.12), 208, 332, fill=color, width=w)
+        draw.arc((s * .06, s * -.12, s * .94, s * .78), 28, 152, fill=color, width=w)
+        draw.ellipse((c - s * .1, c - s * .1, c + s * .1, c + s * .1), fill=color)
+        if name == "eye-off":
+            draw.line([(m, m), (s - m, s - m)], fill=color, width=w)
+    elif name == "copy":
+        draw.rounded_rectangle((s * .34, s * .34, s - m, s - m), int(s * .07), outline=color, width=w)
+        draw.line([(m, s * .62), (m, m), (s * .62, m)], fill=color, width=w, joint="curve")
+    elif name == "trash":
+        draw.line([(m, s * .27), (s - m, s * .27)], fill=color, width=w)
+        draw.line([(s * .4, s * .27), (s * .4, m), (s * .6, m), (s * .6, s * .27)], fill=color, width=w)
+        draw.line([(s * .24, s * .27), (s * .29, s - m), (s * .71, s - m), (s * .76, s * .27)],
+                  fill=color, width=w, joint="curve")
     elif name == "empty-models":
         return line_icon(size, "models", color)
     elif name == "empty-keys":
@@ -98,11 +113,14 @@ def line_icon(size, name, color):
 def main():
     # Provider icons (openai*.png, claude*.png) come from the official logos in vendor/ (tile-*.svg).
     for name in ("overview", "models", "keys", "help"):
-        save(line_icon(18, name, (139, 139, 153)), name, 18)
-        save(line_icon(18, name, (237, 237, 242)), name + "-active", 18)
+        save(line_icon(18, name, (107, 107, 118)), name, 18)
+        save(line_icon(18, name, (91, 79, 240)), name + "-active", 18)
+    for name in ("eye", "eye-off", "copy"):
+        save(line_icon(18, name, (82, 82, 92)), "row-" + name, 18)
+    save(line_icon(18, "trash", (220, 60, 66)), "row-trash", 18)
     for name in ("models", "keys"):
-        image = tile(64, (28, 28, 36), 0.3)
-        glyph = line_icon(36, name, (163, 155, 255))
+        image = tile(64, (238, 236, 254), 0.3)
+        glyph = line_icon(36, name, (91, 79, 240))
         image.alpha_composite(glyph, (14 * SCALE, 14 * SCALE))
         save(image, "empty-" + name, 64)
 
