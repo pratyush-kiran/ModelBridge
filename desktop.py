@@ -8,18 +8,21 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import font as tkfont, messagebox, ttk
 import webbrowser
 
 from bridge import HTTPServer, Handler, QUIET_PROCESS, ask, executable_for, subscription_environment
 from keys import KeyStore
 from providers import discover
+from ui import Pill, RoundFrame, round_rect
 
 BG, PANEL, SIDEBAR = "#f6f6f8", "#ffffff", "#fbfbfc"
 TEXT, MUTED, BORDER = "#18181b", "#6b6b76", "#e5e5ea"
 ACCENT, ACCENT_HOVER, SURFACE, SURFACE_HOVER = "#5b4ff0", "#4a3ee0", "#ffffff", "#f2f2f5"
 NAV_ACTIVE, SELECT, ROW_HOVER, DISABLED = "#efedfe", "#efedfe", "#f8f8fa", "#b9b9c2"
 MINT, BLUE, DANGER = "#15a35a", "#5b4ff0", "#dc3c42"
+GOOD_BG, IDLE_BG, WARN_BG = "#e7f6ee", "#f0f0f3", "#fdf0e6"
+TOUR_KEY = "#76767a"
 FONT = "Segoe UI Variable Text"
 DISPLAY = "Segoe UI Variable Display"
 ICON = Path(__file__).resolve().parent / "assets" / "model-bridge.ico"
@@ -30,29 +33,75 @@ PROVIDERS = {
 }
 
 
-class Button(tk.Label):
-    """A keyboard-operable button with a short hover transition."""
+class Button(tk.Canvas):
+    """A rounded, keyboard-operable button with a short hover transition."""
 
-    def __init__(self, parent, title, command, primary=False, nav=False, image=None):
-        self.primary = primary
-        self.normal = ACCENT if primary else (SIDEBAR if nav else SURFACE)
-        self.hover = ACCENT_HOVER if primary else SURFACE_HOVER
+    def __init__(self, parent, title, command, primary=False, nav=False, image=None, small=False):
+        self.ready = False
+        super().__init__(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0,
+                         cursor="hand2", takefocus=True)
+        self.primary, self.nav = primary, nav
+        self.normal = ACCENT if primary else (parent.cget("bg") if nav else SURFACE)
+        self.hover = ACCENT_HOVER if primary else ("#efeff3" if nav else SURFACE_HOVER)
+        self.edge = None if (primary or nav) else BORDER
         self.command = command
         self.enabled = True
         self.active = False
         self.transition = 0
-        super().__init__(parent, text=title, bg=self.normal, fg="#ffffff" if primary else TEXT,
-                         font=(FONT, 10, "normal" if nav else "bold"),
-                         padx=12 if nav else 14, pady=8 if nav else 6, cursor="hand2",
-                         takefocus=True, anchor="w" if nav else "center",
-                         highlightthickness=1, highlightbackground=self.normal if (primary or nav) else BORDER,
-                         highlightcolor=BLUE)
-        if image is not None:
-            self.configure(image=image, compound="left")
+        self.text, self.image, self.color = title, image, self.normal
+        self.fg = "#ffffff" if primary else TEXT
+        self.font = tkfont.Font(font=(FONT, 9 if small else 10, "normal" if nav else "bold"))
+        self.padx, self.pady = (12, 9) if nav else ((11, 5) if small else (16, 8))
+        self.ready = True
+        self.resize()
+        self.bind("<Configure>", lambda _: self.draw())
         self.bind("<Enter>", lambda _: self.animate(self.hover) if self.enabled else None)
         self.bind("<Leave>", lambda _: self.animate(self.base()))
         for event in ("<Button-1>", "<Return>", "<space>"):
             self.bind(event, self.invoke)
+
+    def resize(self):
+        icon = self.image.width() + 10 if self.image else 0
+        width = self.font.measure(self.text) + 2 * self.padx + icon
+        height = self.font.metrics("linespace") + 2 * self.pady
+        super().configure(width=width, height=height)
+        self.draw()
+
+    def draw(self):
+        if not self.ready:
+            return
+        self.delete("all")
+        width = max(self.winfo_width(), int(super().cget("width")))
+        height = max(self.winfo_height(), int(super().cget("height")))
+        if self.winfo_width() > 1:
+            width = self.winfo_width()
+        round_rect(self, width, height, 9, self.color, self.edge)
+        x = self.padx
+        if self.image:
+            self.create_image(x, height / 2, image=self.image, anchor="w")
+            x += self.image.width() + 10
+        if self.nav or self.image:
+            self.create_text(x, height / 2, text=self.text, fill=self.fg, font=self.font, anchor="w")
+        else:
+            self.create_text(width / 2, height / 2, text=self.text, fill=self.fg, font=self.font)
+
+    def configure(self, cnf=None, **options):
+        if not getattr(self, "ready", False):
+            return super().configure(cnf, **options)
+        changed = False
+        for key, attribute in (("text", "text"), ("fg", "fg"), ("bg", "color"), ("image", "image")):
+            if key in options:
+                setattr(self, attribute, options.pop(key))
+                changed = True
+        if options or cnf:
+            super().configure(cnf, **options)
+        if changed:
+            self.resize()
+
+    config = configure
+
+    def cget(self, key):
+        return {"text": self.text, "bg": self.color, "fg": self.fg}.get(key) or super().cget(key)
 
     def base(self):
         return NAV_ACTIVE if self.active else self.normal
@@ -63,24 +112,23 @@ class Button(tk.Label):
 
     def state(self, enabled):
         self.enabled = bool(enabled)
-        self.configure(cursor="hand2" if self.enabled else "arrow",
-                       fg=("#ffffff" if self.primary else TEXT) if self.enabled else DISABLED,
-                       takefocus=self.enabled)
         self.transition += 1
-        self.configure(bg=self.base())
+        self.configure(cursor="hand2" if self.enabled else "arrow", takefocus=self.enabled,
+                       fg=("#ffffff" if self.primary else TEXT) if self.enabled else DISABLED,
+                       bg=self.base() if self.enabled or not self.primary else "#c9c5f7")
 
     def animate(self, target):
         self.transition += 1
         generation = self.transition
-        start = self.winfo_rgb(self.cget("bg"))
+        start = self.winfo_rgb(self.color)
         end = self.winfo_rgb(target)
 
         def step(index):
             if generation != self.transition:
                 return
-            color = "#" + "".join(f"{int((a + (b-a) * index / 6) / 257):02x}"
-                                  for a, b in zip(start, end))
-            self.configure(bg=color)
+            self.color = "#" + "".join(f"{int((a + (b-a) * index / 6) / 257):02x}"
+                                       for a, b in zip(start, end))
+            self.draw()
             if index < 6:
                 self.after(17, step, index + 1)
 
@@ -133,11 +181,9 @@ def label(parent, value="", size=11, color=TEXT, bold=False, **options):
     return tk.Label(parent, text=value, bg=parent.cget("bg"), fg=color, **options)
 
 
-def card(parent, padding=18):
-    outer = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
-    content = tk.Frame(outer, bg=PANEL, padx=padding, pady=padding)
-    content.pack(fill="both", expand=True)
-    return outer, content
+def card(parent, padding=18, expand=False):
+    frame = RoundFrame(parent, fill=PANEL, border=BORDER, radius=14, padding=padding, expand=expand)
+    return frame, frame.inner
 
 
 class Desktop:
@@ -155,12 +201,14 @@ class Desktop:
         self.sign_in = None
         self.dialog = None
         self.toast_job = None
+        self.connected = set()
+        self.provider_pills = {}
         root.title("Model Bridge")
         self.icons = {path.stem: tk.PhotoImage(master=root, file=str(path))
                       for path in (ICON.parent / "icons").glob("*.png")}
         self.icons["blank"] = tk.PhotoImage(master=root, width=18, height=18)
-        root.geometry("1120x720")
-        root.minsize(940, 620)
+        root.geometry("1140x790")
+        root.minsize(980, 740)
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
         if ICON.is_file():
@@ -226,9 +274,9 @@ class Desktop:
             button.icon = icon
             button.pack(fill="x", pady=1)
             self.nav[name] = button
-        status = tk.Frame(rail, bg=PANEL, padx=12, pady=10, highlightthickness=1,
-                          highlightbackground=BORDER)
-        status.pack(side="bottom", fill="x")
+        status_card = RoundFrame(rail, fill=PANEL, border=BORDER, radius=12, padding=12)
+        status_card.pack(side="bottom", fill="x")
+        status = status_card.inner
         self.dot = tk.Canvas(status, width=14, height=18, bg=PANEL, highlightthickness=0)
         self.dot.pack(side="left")
         self.dot_shape = self.dot.create_oval(2, 5, 10, 13, fill=MUTED, outline="")
@@ -251,7 +299,7 @@ class Desktop:
         page = tk.Frame(self.host, bg=BG)
         self.pages[name] = page
         label(page, title, 22, bold=True).pack(fill="x")
-        label(page, description, 11, MUTED).pack(fill="x", pady=(4, 22))
+        label(page, description, 11, MUTED).pack(fill="x", pady=(4, 18))
         return page
 
     def navigate(self, name):
@@ -264,54 +312,92 @@ class Desktop:
             button.configure(bg=button.base(), fg=ACCENT if key == name else MUTED,
                              image=self.icons[button.icon + ("-active" if key == name else "")])
 
+    def stat(self, parent, column, title, icon):
+        frame, inner = card(parent, padding=15)
+        frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 8, 0))
+        parent.columnconfigure(column, weight=1, uniform="stat")
+        top = tk.Frame(inner, bg=PANEL)
+        top.pack(fill="x")
+        label(top, title, 9, MUTED).pack(side="left")
+        tk.Label(top, image=self.icons[icon], bg=PANEL).pack(side="right")
+        value = label(inner, "\u2013", 18, bold=True)
+        value.pack(fill="x", pady=(6, 0))
+        return value
+
     def build_overview(self):
         page = self.page("Overview", "Overview", "Connect your accounts and start the API on this PC.")
+        stats = tk.Frame(page, bg=BG)
+        stats.pack(fill="x", pady=(0, 14))
+        self.stat_accounts = self.stat(stats, 0, "Accounts connected", "overview")
+        self.stat_models = self.stat(stats, 1, "Models available", "models")
+        self.stat_keys = self.stat(stats, 2, "Active API keys", "keys")
         grid = tk.Frame(page, bg=BG)
         grid.pack(fill="x")
         self.provider_grid = grid
         self.provider_ui = {}
-        for column, (provider, (name, initials, _)) in enumerate(PROVIDERS.items()):
+        for column, (provider, (name, _, _)) in enumerate(PROVIDERS.items()):
             grid.columnconfigure(column, weight=1, uniform="provider")
-            outer, inner = card(grid)
-            outer.grid(row=0, column=column, sticky="nsew", padx=(0, 8) if column == 0 else (8, 0))
+            outer, inner = card(grid, padding=20)
+            outer.grid(row=0, column=column, sticky="nsew", padx=(0, 7) if column == 0 else (7, 0))
             header = tk.Frame(inner, bg=PANEL)
             header.pack(fill="x")
-            badge = tk.Label(header, image=self.icons[ICONS[provider]], bg=PANEL)
-            badge.pack(side="left", padx=(0, 12))
+            tk.Label(header, image=self.icons[ICONS[provider]], bg=PANEL).pack(side="left", padx=(0, 12))
             titles = tk.Frame(header, bg=PANEL)
             titles.pack(side="left")
-            label(titles, name, 15, bold=True).pack(fill="x")
-            label(titles, "Subscription via official CLI", 9, MUTED).pack(fill="x")
-            state = label(inner, "Checking connection…", 10, MUTED,
-                          wraplength=300, height=3, justify="left")
-            state.pack(fill="x", pady=(8, 10))
-            button = Button(inner, "Connect", lambda provider=provider: self.connect(provider))
+            label(titles, name, 14, bold=True).pack(fill="x")
+            label(titles, "Official CLI sign-in", 9, MUTED).pack(fill="x")
+            pill = Pill(header)
+            pill.set("Checking", MUTED, IDLE_BG)
+            pill.pack(side="right", anchor="n")
+            state = label(inner, "Checking connection\u2026", 10, MUTED,
+                          wraplength=300, height=2, justify="left")
+            state.pack(fill="x", pady=(14, 12))
+            button = Button(inner, "Connect", lambda provider=provider: self.connect(provider), small=True)
             button.pack(anchor="w")
             self.provider_ui[provider] = (state, button)
+            self.provider_pills[provider] = pill
         self.progress = ttk.Progressbar(page, mode="indeterminate")
-        self.api_card, inner = card(page)
-        self.api_card.pack(fill="x", pady=(16, 0))
+        self.api_card, inner = card(page, padding=20)
+        self.api_card.pack(fill="x", pady=(14, 0))
         endpoint_header = tk.Frame(inner, bg=PANEL)
         endpoint_header.pack(fill="x")
-        label(endpoint_header, "Local API", 15, bold=True).pack(side="left")
+        label(endpoint_header, "Local API", 14, bold=True).pack(side="left")
+        self.api_pill = Pill(endpoint_header)
+        self.api_pill.set("Stopped", MUTED, IDLE_BG)
+        self.api_pill.pack(side="left", padx=10)
         self.toggle_button = Button(endpoint_header, "Start local API", self.toggle, primary=True)
         self.toggle_button.pack(side="right")
-        label(inner, "Use this URL in an OpenAI-compatible client.", 10, MUTED).pack(fill="x", pady=(5, 12))
+        label(inner, "Point any OpenAI-compatible client at this base URL.", 10, MUTED).pack(fill="x", pady=(4, 12))
         endpoint = tk.Frame(inner, bg=PANEL)
         endpoint.pack(fill="x")
         self.url = tk.StringVar(value="Start the API to get a base URL")
         self.url_entry = self.entry(endpoint, self.url, read_only=True, mono=True)
-        self.url_entry.pack(side="left", fill="x", expand=True, ipady=7)
+        self.url_entry.pack(side="left", fill="x", expand=True)
         self.url_button = Button(endpoint, "Copy URL", lambda: self.copy(self.url.get(), "Base URL copied."))
         self.url_button.pack(side="right", padx=(8, 0))
-        Button(inner, "Manage API keys", lambda: self.navigate("API keys")).pack(anchor="w", pady=(12, 0))
+        link = label(inner, "Manage API keys  \u2192", 10, ACCENT, cursor="hand2")
+        link.pack(anchor="w", pady=(12, 0))
+        link.bind("<Button-1>", lambda _: self.navigate("API keys"))
+
+    def update_stats(self):
+        connected = sum(1 for provider in PROVIDERS if provider in self.connected)
+        self.stat_accounts.config(text=f"{connected} / {len(PROVIDERS)}")
+        self.stat_models.config(text="\u2026" if self.pending else str(len(self.models)))
+        self.stat_keys.config(text=str(len(self.store.keys)))
 
     def entry(self, parent, variable, read_only=False, mono=False):
-        return tk.Entry(parent, textvariable=variable, state="readonly" if read_only else "normal",
-                        font=("Cascadia Mono" if mono else FONT, 10),
-                        bg=BG, readonlybackground=BG, fg=TEXT, insertbackground=TEXT,
-                        relief="flat", highlightthickness=1, highlightbackground=BORDER,
-                        highlightcolor=ACCENT, selectbackground="#d9d5fd", selectforeground=TEXT)
+        frame = RoundFrame(parent, fill="#ffffff" if not read_only else "#f7f7f9", border=BORDER,
+                           radius=9, padding=0)
+        field = tk.Entry(frame.inner, textvariable=variable, state="readonly" if read_only else "normal",
+                         font=("Cascadia Mono" if mono else FONT, 10), bd=0,
+                         bg=frame.fill, readonlybackground=frame.fill, fg=TEXT, insertbackground=TEXT,
+                         relief="flat", highlightthickness=0, selectbackground="#d9d5fd",
+                         selectforeground=TEXT)
+        field.pack(fill="x", padx=12, pady=9)
+        field.bind("<FocusIn>", lambda _: frame.recolor(frame.fill, ACCENT), add="+")
+        field.bind("<FocusOut>", lambda _: frame.recolor(frame.fill, BORDER), add="+")
+        frame.field = field
+        return frame
 
     def empty_state(self, host, icon, title, text, action=None, command=None):
         """A centred fallback panel placed over a table when it has nothing to show."""
@@ -331,8 +417,8 @@ class Desktop:
         return panel
 
     def table(self, parent, columns, icons=False):
-        frame, inner = card(parent, padding=1)
-        frame.pack(fill="both", expand=True, pady=(8, 0))
+        frame, inner = card(parent, padding=6, expand=True)
+        frame.pack(fill="both", expand=True, pady=(10, 0))
         tree = ttk.Treeview(inner, columns=[key for key, _, _ in columns],
                             show="tree headings" if icons else "headings", selectmode="browse")
         tree.column("#0", width=44 if icons else 0, minwidth=44 if icons else 0, stretch=False)
@@ -355,7 +441,7 @@ class Desktop:
         bar.pack(fill="x")
         label(bar, "Filter", 10, MUTED).pack(side="left", padx=(0, 7))
         self.filter = tk.StringVar()
-        self.entry(bar, self.filter).pack(side="left", fill="x", expand=True, ipady=7, padx=(0, 10))
+        self.entry(bar, self.filter).pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.refresh_button = Button(bar, "Refresh models", self.refresh)
         self.refresh_button.pack(side="right")
         self.model_tree = self.table(page, (("label", "Model", 210), ("id", "API model ID", 260),
@@ -383,8 +469,8 @@ class Desktop:
         self.key_caption = label(bar, "", 11, MUTED)
         self.key_caption.pack(side="left")
         Button(bar, "Create key", self.create_key, primary=True).pack(side="right")
-        self.keys_card, inner = card(page, padding=0)
-        self.keys_card.pack(fill="both", expand=True, pady=(8, 0))
+        self.keys_card, inner = card(page, padding=6, expand=True)
+        self.keys_card.pack(fill="both", expand=True, pady=(10, 0))
         header = tk.Frame(inner, bg=PANEL, padx=16, pady=10)
         header.pack(fill="x")
         self.key_columns(header)
@@ -497,6 +583,7 @@ class Desktop:
             else:
                 button.pack()
             self.models_empty.place(x=0, y=0, relwidth=1, relheight=1)
+        self.update_stats()
         self.models_caption.config(text="Loading model catalog…" if self.pending else
                                    f"{len(visible)} of {len(self.models)} models")
         self.update_buttons()
@@ -511,6 +598,8 @@ class Desktop:
             self.keys_empty.place_forget()
         else:
             self.keys_empty.place(x=0, y=0, relwidth=1, relheight=1)
+        if hasattr(self, "stat_keys"):
+            self.update_stats()
         self.key_caption.config(text=f"{count} active {'key' if count == 1 else 'keys'}")
         self.update_buttons()
 
@@ -578,12 +667,14 @@ class Desktop:
         ring.transient(root)
         ring.attributes("-transparentcolor", "#010203")
         tk.Frame(ring, bg="#010203").pack(fill="both", expand=True, padx=2, pady=2)
-        dialog = tk.Toplevel(root, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
+        dialog = tk.Toplevel(root, bg=TOUR_KEY)
         dialog.overrideredirect(True)
+        dialog.attributes("-transparentcolor", TOUR_KEY)
         dialog.transient(root)
         self.tour_window = dialog
-        body = tk.Frame(dialog, bg=PANEL, padx=26, pady=22)
-        body.pack(fill="both", expand=True)
+        shell = RoundFrame(dialog, fill=PANEL, radius=18, padding=26)
+        shell.pack(fill="both", expand=True)
+        body = shell.inner
         self.tour_logo = tk.PhotoImage(file=str(ICON.parent / "logo-header.png"))
         tk.Label(body, image=self.tour_logo, bg=PANEL).pack(anchor="w", pady=(0, 16))
         title = label(body, "", 18, bold=True)
@@ -693,8 +784,8 @@ class Desktop:
         dialog, body = self.modal("Create local API key", "Give this key a name so you can identify the client later.")
         name = tk.StringVar()
         entry = self.entry(body, name)
-        entry.pack(fill="x", ipady=7, pady=(0, 11))
-        entry.focus_set()
+        entry.pack(fill="x", pady=(0, 11))
+        entry.field.focus_set()
 
         def create():
             text = name.get().strip()
@@ -712,12 +803,12 @@ class Desktop:
                 "Copy the key into your client. You can show or copy it again later from API keys.")
             value = tk.StringVar(master=reveal, value=token)
             field = self.entry(content, value, read_only=True, mono=True)
-            field.configure(width=50)
-            field.pack(fill="x", ipady=7, pady=(0, 12))
+            field.field.configure(width=50)
+            field.pack(fill="x", pady=(0, 12))
             Button(content, "Copy key", lambda: self.copy(token, f"Key for {text} copied."), primary=True).pack(side="left")
             Button(content, "Done", reveal.destroy).pack(side="right")
 
-        entry.bind("<Return>", lambda _: create())
+        entry.field.bind("<Return>", lambda _: create())
         Button(body, "Create key", create, primary=True).pack(side="right")
         Button(body, "Cancel", dialog.destroy).pack(side="right", padx=8)
 
@@ -845,6 +936,7 @@ class Desktop:
         self.progress.start(12)
         for provider, (state, _) in self.provider_ui.items():
             state.config(text="Checking connection…", fg=MUTED)
+            self.provider_pills[provider].set("Checking", MUTED, IDLE_BG)
 
             def load(provider=provider):
                 self.events.put(("catalog", provider, discover(provider)))
@@ -866,7 +958,13 @@ class Desktop:
                 status, models = value
                 self.account[identifier] = status
                 state, button = self.provider_ui[identifier]
-                state.config(text=status, fg=MINT if models else MUTED)
+                state.config(text=status, fg=TEXT if models else MUTED)
+                if models:
+                    self.connected.add(identifier)
+                    self.provider_pills[identifier].set("Connected", MINT, GOOD_BG)
+                else:
+                    self.connected.discard(identifier)
+                    self.provider_pills[identifier].set("Not connected", "#b26a1f", WARN_BG)
                 button.config(text="Reconnect" if models else ("Install CLI" if "not found" in status else "Sign in"))
                 self.models.update(models)
                 self.pending -= 1
@@ -964,6 +1062,8 @@ class Desktop:
                                 ("API stopping" if self.stopping else "API stopped"),
                                 fg=MINT if running else MUTED)
         self.dot.itemconfig(self.dot_shape, fill=MINT if running else MUTED)
+        self.api_pill.set("Running" if running else ("Stopping" if self.stopping else "Stopped"),
+                          MINT if running else MUTED, GOOD_BG if running else IDLE_BG)
         self.toggle_button.config(text="Stop local API" if running else
                                   ("Stopping…" if self.stopping else "Start local API"))
         self.update_buttons()
