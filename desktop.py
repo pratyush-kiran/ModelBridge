@@ -19,7 +19,7 @@ from ui import Pill, RoundFrame, round_rect
 BG, PANEL, SIDEBAR = "#f6f6f8", "#ffffff", "#fbfbfc"
 TEXT, MUTED, BORDER = "#18181b", "#6b6b76", "#e5e5ea"
 ACCENT, ACCENT_HOVER, SURFACE, SURFACE_HOVER = "#5b4ff0", "#4a3ee0", "#ffffff", "#f2f2f5"
-NAV_ACTIVE, SELECT, ROW_HOVER, DISABLED = "#efedfe", "#efedfe", "#f8f8fa", "#b9b9c2"
+NAV_ACTIVE, SELECT, ROW_HOVER, DISABLED = "#efedfe", "#efedfe", "#f4f4f7", "#a3a3ad"
 MINT, BLUE, DANGER = "#15a35a", "#5b4ff0", "#dc3c42"
 GOOD_BG, IDLE_BG, WARN_BG = "#e7f6ee", "#f0f0f3", "#fdf0e6"
 TOUR_KEY = "#76767a"
@@ -38,6 +38,7 @@ class Button(tk.Canvas):
 
     def __init__(self, parent, title, command, primary=False, nav=False, image=None, small=False):
         self.ready = False
+        self.focused = False
         super().__init__(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0,
                          cursor="hand2", takefocus=True)
         self.primary, self.nav = primary, nav
@@ -55,6 +56,8 @@ class Button(tk.Canvas):
         self.ready = True
         self.resize()
         self.bind("<Configure>", lambda _: self.draw())
+        self.bind("<FocusIn>", lambda _: self.set_focus(True))
+        self.bind("<FocusOut>", lambda _: self.set_focus(False))
         self.bind("<Enter>", lambda _: self.animate(self.hover) if self.enabled else None)
         self.bind("<Leave>", lambda _: self.animate(self.base()))
         for event in ("<Button-1>", "<Return>", "<space>"):
@@ -75,7 +78,7 @@ class Button(tk.Canvas):
         height = max(self.winfo_height(), int(super().cget("height")))
         if self.winfo_width() > 1:
             width = self.winfo_width()
-        round_rect(self, width, height, 9, self.color, self.edge)
+        round_rect(self, width, height, 9, self.color, ACCENT if self.focused else self.edge)
         x = self.padx
         if self.image:
             self.create_image(x, height / 2, image=self.image, anchor="w")
@@ -102,6 +105,10 @@ class Button(tk.Canvas):
 
     def cget(self, key):
         return {"text": self.text, "bg": self.color, "fg": self.fg}.get(key) or super().cget(key)
+
+    def set_focus(self, focused):
+        self.focused = focused
+        self.draw()
 
     def base(self):
         return NAV_ACTIVE if self.active else self.normal
@@ -266,7 +273,6 @@ class Desktop:
         words.pack(side="left")
         label(words, "Model Bridge", 12, bold=True).pack(fill="x")
         label(words, "Local AI gateway", 9, MUTED).pack(fill="x")
-        label(rail, "WORKSPACE", 8, "#9a9aa6", bold=True).pack(fill="x", padx=12, pady=(0, 6))
         self.nav = {}
         for name, icon in (("Overview", "overview"), ("Models", "models"), ("API keys", "keys")):
             button = Button(rail, f"  {name}", lambda name=name: self.navigate(name), nav=True,
@@ -312,25 +318,8 @@ class Desktop:
             button.configure(bg=button.base(), fg=ACCENT if key == name else MUTED,
                              image=self.icons[button.icon + ("-active" if key == name else "")])
 
-    def stat(self, parent, column, title, icon):
-        frame, inner = card(parent, padding=15)
-        frame.grid(row=0, column=column, sticky="nsew", padx=(0 if column == 0 else 8, 0))
-        parent.columnconfigure(column, weight=1, uniform="stat")
-        top = tk.Frame(inner, bg=PANEL)
-        top.pack(fill="x")
-        label(top, title, 9, MUTED).pack(side="left")
-        tk.Label(top, image=self.icons[icon], bg=PANEL).pack(side="right")
-        value = label(inner, "\u2013", 18, bold=True)
-        value.pack(fill="x", pady=(6, 0))
-        return value
-
     def build_overview(self):
         page = self.page("Overview", "Overview", "Connect your accounts and start the API on this PC.")
-        stats = tk.Frame(page, bg=BG)
-        stats.pack(fill="x", pady=(0, 14))
-        self.stat_accounts = self.stat(stats, 0, "Accounts connected", "overview")
-        self.stat_models = self.stat(stats, 1, "Models available", "models")
-        self.stat_keys = self.stat(stats, 2, "Active API keys", "keys")
         grid = tk.Frame(page, bg=BG)
         grid.pack(fill="x")
         self.provider_grid = grid
@@ -350,8 +339,9 @@ class Desktop:
             pill.set("Checking", MUTED, IDLE_BG)
             pill.pack(side="right", anchor="n")
             state = label(inner, "Checking connection\u2026", 10, MUTED,
-                          wraplength=300, height=2, justify="left")
+                          height=2, justify="left")
             state.pack(fill="x", pady=(14, 12))
+            state.bind("<Configure>", lambda event, state=state: state.config(wraplength=max(120, event.width - 4)))
             button = Button(inner, "Connect", lambda provider=provider: self.connect(provider), small=True)
             button.pack(anchor="w")
             self.provider_ui[provider] = (state, button)
@@ -375,15 +365,9 @@ class Desktop:
         self.url_entry.pack(side="left", fill="x", expand=True)
         self.url_button = Button(endpoint, "Copy URL", lambda: self.copy(self.url.get(), "Base URL copied."))
         self.url_button.pack(side="right", padx=(8, 0))
-        link = label(inner, "Manage API keys  \u2192", 10, ACCENT, cursor="hand2")
+        link = label(inner, "Manage API keys", 10, ACCENT, cursor="hand2")
         link.pack(anchor="w", pady=(12, 0))
         link.bind("<Button-1>", lambda _: self.navigate("API keys"))
-
-    def update_stats(self):
-        connected = sum(1 for provider in PROVIDERS if provider in self.connected)
-        self.stat_accounts.config(text=f"{connected} / {len(PROVIDERS)}")
-        self.stat_models.config(text="\u2026" if self.pending else str(len(self.models)))
-        self.stat_keys.config(text=str(len(self.store.keys)))
 
     def entry(self, parent, variable, read_only=False, mono=False):
         frame = RoundFrame(parent, fill="#ffffff" if not read_only else "#f7f7f9", border=BORDER,
@@ -583,7 +567,6 @@ class Desktop:
             else:
                 button.pack()
             self.models_empty.place(x=0, y=0, relwidth=1, relheight=1)
-        self.update_stats()
         self.models_caption.config(text="Loading model catalog…" if self.pending else
                                    f"{len(visible)} of {len(self.models)} models")
         self.update_buttons()
@@ -598,8 +581,6 @@ class Desktop:
             self.keys_empty.place_forget()
         else:
             self.keys_empty.place(x=0, y=0, relwidth=1, relheight=1)
-        if hasattr(self, "stat_keys"):
-            self.update_stats()
         self.key_caption.config(text=f"{count} active {'key' if count == 1 else 'keys'}")
         self.update_buttons()
 
