@@ -1,18 +1,108 @@
-![Model Bridge](assets/logo.png)
+<p align="center">
+  <img src="assets/logo.png" width="96" alt="Model Bridge logo">
+</p>
 
-# Model Bridge
+<h1 align="center">Model Bridge</h1>
 
-Model Bridge is a Windows desktop app that exposes an OpenAI-compatible text endpoint on your PC. It builds its model catalog from the installed Codex and Claude Code CLIs and uses the provider sign-ins stored by those CLIs.
+<p align="center">
+  Use your ChatGPT and Claude subscriptions as a local, OpenAI-compatible API on Windows.
+</p>
 
-1. Open **Overview** and connect ChatGPT or Claude. If the CLI is missing, choose Install CLI to open the Windows installer in a terminal.
-2. Create a named key under **API keys** and copy it into your client. Only the key fingerprint is saved. Revoke the key to immediately block new requests using it.
-3. Start the API from **Overview** and copy the displayed URL. The app uses port 8765 when available and picks a free port otherwise.
-4. Select a model under **Models** and copy its API model ID. Test the model in the app to confirm access. The test uses one provider request.
+<p align="center">
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-6e62f6">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.12-6e62f6">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-6e62f6">
+</p>
 
-The API listens on `127.0.0.1` and accepts a local bearer key. It supports `GET /v1/models` and single-response text calls to `POST /v1/chat/completions`. The CLI catalog can include models your account cannot run. Subscription availability and request limits are controlled by the providers.
+---
 
-## Develop and build
+Model Bridge is a small desktop app that runs an OpenAI-compatible endpoint on `127.0.0.1`. Requests are answered
+through the official **Codex** (ChatGPT) and **Claude Code** CLIs, using the sign-ins those CLIs already store. Point
+any tool that speaks the OpenAI API (editors, chat front-ends, scripts) at it and pick a model.
 
-Run `python desktop.py` with Python 3.12 and Tk. For a standalone Windows executable, install PyInstaller and run `./build.ps1`. The executable will be in `dist/ModelBridge.exe`. Codex and Claude Code are installed separately.
+## Features
 
-`bridge.py` also retains the original console entry point.
+- **Connect accounts** – sign in to ChatGPT or Claude through the official CLIs; missing CLIs install with one click (winget).
+- **Model catalog** – every model your plans expose, with provider icons, search and a one-click access test.
+- **Named API keys** – one key per client. Show, copy or revoke any key later. Keys are encrypted with Windows DPAPI for your user account; requests are checked against SHA-256 fingerprints.
+- **Local only** – the server listens on `127.0.0.1` (port 8765, or a free port if it is taken).
+- **First-run tour** – a short walkthrough on first launch, available any time from *Getting started*.
+
+## Install
+
+Download `ModelBridge.exe` from [Releases](../../releases) and run it. No installer or admin rights needed.
+
+You also need at least one of these CLIs (Model Bridge can install them for you):
+
+| Provider | CLI | winget id |
+|---|---|---|
+| ChatGPT | Codex | `OpenAI.Codex` |
+| Claude | Claude Code | `Anthropic.ClaudeCode` |
+
+## Quick start
+
+1. **Overview → Connect** ChatGPT or Claude and finish the sign-in window.
+2. **API keys → Create key**, name it after your client (for example *Cursor*).
+3. **Overview → Start local API**, then **Copy URL** (for example `http://127.0.0.1:8765/v1`).
+4. **Models** – select a model, **Test model**, then **Copy model ID**.
+5. In your client choose an *OpenAI-compatible* provider and paste the base URL, key and model ID.
+
+```bash
+curl http://127.0.0.1:8765/v1/chat/completions \
+  -H "Authorization: Bearer mb_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "claude/default", "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### Supported endpoints
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/models` | Models reported by the connected CLIs |
+| `POST` | `/v1/chat/completions` | Single, non-streaming text responses |
+
+The CLI catalog can list models your plan cannot run. Availability and rate limits are set by each provider, and
+your use must follow their terms.
+
+## Build from source
+
+```bash
+git clone https://github.com/pratyush-kiran/ModelBridge.git
+```
+
+```bash
+python desktop.py
+```
+
+```bash
+pip install pyinstaller
+```
+
+```powershell
+./build.ps1   # produces dist/ModelBridge.exe
+```
+
+Requires Python 3.12 with Tk. `bridge.py` keeps the original console entry point.
+
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `desktop.py` | Tkinter desktop app (UI, tour, server control) |
+| `bridge.py` | OpenAI-compatible HTTP server and CLI calls |
+| `providers.py` | Discovers CLIs, accounts and models |
+| `keys.py` | Encrypted local API key store |
+| `assets/` | Logo, icon and UI icons (`assets/brand` has the SVG masters and icon generator) |
+
+## Contributing
+
+Issues and pull requests are welcome. Please keep changes small and describe how you tested them on Windows.
+
+## Disclaimer
+
+Model Bridge is an independent project and is not affiliated with or endorsed by OpenAI or Anthropic. ChatGPT,
+Codex, Claude and Claude Code are trademarks of their respective owners.
+
+## License
+
+[MIT](LICENSE)

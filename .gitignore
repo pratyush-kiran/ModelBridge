@@ -3,3 +3,6 @@ __pycache__/
 /build/
 /dist/
 *.spec
+
+# Brand render scratch
+assets/brand/r/
