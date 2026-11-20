@@ -1,6 +1,7 @@
 """Model Bridge desktop application."""
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import queue
@@ -179,6 +180,32 @@ TOUR = (
      "Models lists every model your accounts can use. Select one, use Test model to confirm it answers, "
      "then Copy model ID into your app. You're all set."),
 )
+DEFAULT_PORT = 8765
+SETTINGS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelBridge" / "settings.json"
+
+
+def load_port():
+    """The port the API used last time, so client base URLs never change."""
+    try:
+        port = json.loads(SETTINGS.read_text(encoding="utf-8")).get("port")
+        return port if isinstance(port, int) and 1024 <= port <= 65535 else DEFAULT_PORT
+    except (OSError, ValueError, AttributeError):
+        return DEFAULT_PORT
+
+
+def save_port(port):
+    try:
+        settings = json.loads(SETTINGS.read_text(encoding="utf-8")) if SETTINGS.exists() else {}
+    except (OSError, ValueError):
+        settings = {}
+    settings["port"] = port
+    try:
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
 TOUR_FLAG = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelBridge" / "tour-complete"
 
 
@@ -1008,14 +1035,23 @@ class Desktop:
             self.create_key()
             self.notify("Create a key, then start the API from Overview.")
             return
-        try:
+        saved = load_port()
+        for port in dict.fromkeys([saved, *range(DEFAULT_PORT, DEFAULT_PORT + 40)]):
             try:
-                self.server = HTTPServer(("127.0.0.1", 8765), Handler)
+                self.server = HTTPServer(("127.0.0.1", port), Handler)
+                break
             except OSError:
-                self.server = HTTPServer(("127.0.0.1", 0), Handler)
-        except OSError as exc:
-            messagebox.showerror("Cannot start local API", str(exc), parent=self.root)
+                continue
+        else:
+            messagebox.showerror("Cannot start local API",
+                f"Ports {DEFAULT_PORT}-{DEFAULT_PORT + 39} are all in use. Close another local server and try again.",
+                parent=self.root)
             return
+        if self.server.server_port != saved:
+            save_port(self.server.server_port)
+            if saved != DEFAULT_PORT or self.server.server_port != DEFAULT_PORT:
+                self.notify(f"Port {saved} is in use by another app, so the API now uses "
+                            f"{self.server.server_port}. It will keep this port from now on.", DANGER)
         self.server.key_check = self.store.contains
         self.publish()
         threading.Thread(target=self.server.serve_forever, daemon=True).start()

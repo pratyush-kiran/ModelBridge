@@ -17,7 +17,7 @@ def _mix(colors_weights):
 
 def corner(widget, radius, fill, border, outside, quadrant):
     """An anti-aliased quarter circle (fill + 1 px border) blended onto `outside`."""
-    key = (radius, fill, border, outside, quadrant)
+    key = (id(widget._root()), radius, fill, border, outside, quadrant)
     if key in _CORNERS:
         return _CORNERS[key]
     f, b, o = _rgb(widget, fill), _rgb(widget, border or fill), _rgb(widget, outside)
