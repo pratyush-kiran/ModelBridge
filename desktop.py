@@ -182,6 +182,7 @@ TOUR = (
      "then Copy model ID into your app. You're all set."),
 )
 DEFAULT_PORT = 8765
+SHADE_MODE = os.environ.get("MODEL_BRIDGE_SHADE", "window")  # "off" skips dimming the page
 SETTINGS = data_directory() / "settings.json"
 
 
@@ -690,17 +691,12 @@ class Desktop:
             return
         root = self.root
         shades = []
-        for _ in range(9):
+        for _ in range(9 if SHADE_MODE == "window" else 0):
             shade = tk.Toplevel(root, bg="#0b0b16")
             shade.withdraw()
-            if MACOS:
-                try:
-                    root.tk.call("::tk::unsupported::MacWindowStyle", "style", shade, "plain", "none")
-                except tk.TclError:
-                    shade.overrideredirect(True)
-            else:
-                shade.overrideredirect(True)
-            shade.transient(root)
+            shade.overrideredirect(True)
+            if not MACOS:
+                shade.transient(root)
             shade.attributes("-alpha", 0.45)
             shade.bind("<Button-1>", lambda _: dialog.focus_set())
             shades.append(shade)

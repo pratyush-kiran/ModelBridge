@@ -25,7 +25,10 @@ jobs:
       - name: Test the app
         env:
           MODEL_BRIDGE_SHOTS: shots
-        run: python3 -m unittest discover -s tests -v
+        run: mkdir -p shots && python3 -m unittest discover -s tests -v
+      - name: Diagnose drawing
+        continue-on-error: true
+        run: python3 tests/diagnose_mac.py shots/diagnose 2>&1 | tee shots/diagnose.txt
       - name: Build
         run: bash build-macos.sh
       - name: Open the built app the way a user would
