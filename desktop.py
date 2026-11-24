@@ -707,8 +707,10 @@ class Desktop:
             shades.append(shade)
         ring = [tk.Frame(root, bg=ACCENT) for _ in range(4)]
         # The card's corners blend into the shade around it.
-        dialog = self.tour_window = tk.Frame(root, bg=TOUR_SHADE, takefocus=True)
-        shell = RoundFrame(dialog, fill=PANEL, radius=18, padding=26)
+        # Without the shade the card's corners meet the page, so give it a border and a small radius.
+        dialog = self.tour_window = tk.Frame(root, bg=TOUR_SHADE if shades else PANEL, takefocus=True)
+        shell = RoundFrame(dialog, fill=PANEL, border=None if shades else BORDER,
+                           radius=18 if shades else 6, padding=26)
         shell.pack(fill="both", expand=True)
         body = shell.inner
         self.tour_logo = tk.PhotoImage(file=str(ICON.parent / "logo-header.png"))

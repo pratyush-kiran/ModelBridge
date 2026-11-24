@@ -29,6 +29,12 @@ jobs:
       - name: Diagnose drawing
         continue-on-error: true
         run: python3 tests/diagnose_mac.py shots/diagnose 2>&1 | tee shots/diagnose.txt
+      - name: Diagnose under the real main loop
+        continue-on-error: true
+        run: |
+          for scenario in tour notour repack; do
+            python3 tests/diagnose_mainloop.py $scenario shots/mainloop 2>&1 | grep -v "^invalid command\|while executing\|after\" script\|Failed to read" | tail -5
+          done
       - name: Build
         run: bash build-macos.sh
       - name: Open the built app the way a user would
