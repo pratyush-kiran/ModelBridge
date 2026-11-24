@@ -1,8 +1,8 @@
 """Persistent local API keys.
 
 Requests are checked against SHA-256 fingerprints. So that a key can be viewed
-and copied again later, the key itself is also kept, encrypted for the current
-Windows user with DPAPI (other platforms store it base64-encoded only).
+and copied again later, the key itself is also kept: encrypted with DPAPI on
+Windows, in the login Keychain on macOS. Elsewhere only the fingerprint is kept.
 """
 
 from datetime import datetime
@@ -13,8 +13,20 @@ import json
 import os
 from pathlib import Path
 import secrets
+import subprocess
+import sys
 import tempfile
 from threading import Lock
+
+import macos
+
+MACOS = sys.platform == "darwin"
+
+
+def data_directory():
+    if MACOS:
+        return Path.home() / "Library" / "Application Support" / "ModelBridge"
+    return Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share")) / "ModelBridge"
 
 
 class _Blob(ctypes.Structure):
@@ -22,8 +34,6 @@ class _Blob(ctypes.Structure):
 
 
 def _dpapi(data, protect):
-    if os.name != "nt":
-        return data
     source = _Blob(len(data), ctypes.cast(ctypes.create_string_buffer(data, len(data)),
                                           ctypes.POINTER(ctypes.c_char)))
     result = _Blob()
@@ -36,19 +46,24 @@ def _dpapi(data, protect):
         ctypes.windll.kernel32.LocalFree(result.data)
 
 
-def seal(token):
-    return base64.b64encode(_dpapi(token.encode(), True)).decode()
+def seal(digest, token):
+    if os.name == "nt":
+        return base64.b64encode(_dpapi(token.encode(), True)).decode()
+    if MACOS:
+        macos.keychain_save(digest, token)
+        return "keychain"
+    return ""
 
 
-def unseal(secret):
-    return _dpapi(base64.b64decode(secret), False).decode()
+def unseal(digest, secret):
+    if os.name == "nt":
+        return _dpapi(base64.b64decode(secret), False).decode()
+    return macos.keychain_read(digest)
 
 
 class KeyStore:
     def __init__(self, path=None):
-        self.path = Path(path) if path else Path(
-            os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share")
-        ) / "ModelBridge" / "keys.json"
+        self.path = Path(path) if path else data_directory() / "keys.json"
         self.lock = Lock()
         if self.path.exists():
             self.keys = json.loads(self.path.read_text(encoding="utf-8"))
@@ -80,7 +95,7 @@ class KeyStore:
         token = "mb_" + secrets.token_urlsafe(32)
         digest = hashlib.sha256(token.encode()).hexdigest()
         record = {"name": name, "suffix": token[-6:], "date": datetime.now().strftime("%d %b %Y"),
-                  "secret": seal(token)}
+                  "secret": seal(digest, token)}
         with self.lock:
             self.commit({**self.keys, digest: record})
         return token
@@ -90,9 +105,15 @@ class KeyStore:
         secret = self.keys.get(digest, {}).get("secret")
         if not secret:
             return None
-        token = unseal(secret)
+        token = unseal(digest, secret)
         return token if hashlib.sha256(token.encode()).hexdigest() == digest else None
 
     def revoke(self, digest):
         with self.lock:
-            self.commit({key: record for key, record in self.keys.items() if key != digest})
+            record = self.keys.get(digest, {})
+            self.commit({key: value for key, value in self.keys.items() if key != digest})
+        if MACOS and record.get("secret"):
+            try:
+                macos.keychain_delete(digest)
+            except (OSError, subprocess.SubprocessError):
+                pass  # Already revoked; a leftover Keychain item grants nothing.

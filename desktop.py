@@ -5,17 +5,19 @@ import json
 import os
 from pathlib import Path
 import queue
+import shlex
 import subprocess
-import sys
 import threading
 import tkinter as tk
 from tkinter import font as tkfont, messagebox, ttk
-import webbrowser
 
-from bridge import HTTPServer, Handler, QUIET_PROCESS, ask, executable_for, subscription_environment
-from keys import KeyStore
+
+from bridge import (Handler, LocalServer, PROVIDER_VARIABLES, ask, executable_for, search_path,
+                    subscription_environment)
+from keys import KeyStore, data_directory
+import macos
 from providers import discover
-from ui import Pill, RoundFrame, round_rect
+from ui import DISPLAY, FONT, MACOS, MONO, Pill, RoundFrame, round_rect
 
 BG, PANEL, SIDEBAR = "#f6f6f8", "#ffffff", "#fbfbfc"
 TEXT, MUTED, BORDER = "#18181b", "#6b6b76", "#e5e5ea"
@@ -23,9 +25,7 @@ ACCENT, ACCENT_HOVER, SURFACE, SURFACE_HOVER = "#5b4ff0", "#4a3ee0", "#ffffff", 
 NAV_ACTIVE, SELECT, ROW_HOVER, DISABLED = "#efedfe", "#efedfe", "#f4f4f7", "#a3a3ad"
 MINT, BLUE, DANGER = "#15a35a", "#5b4ff0", "#dc3c42"
 GOOD_BG, IDLE_BG, WARN_BG = "#e7f6ee", "#f0f0f3", "#fdf0e6"
-TOUR_KEY = "#76767a"
-FONT = "Segoe UI Variable Text"
-DISPLAY = "Segoe UI Variable Display"
+TOUR_SHADE = "#8b8b90"
 ICON = Path(__file__).resolve().parent / "assets" / "model-bridge.ico"
 ICONS = {"codex": "openai", "claude": "claude"}
 PROVIDERS = {
@@ -52,7 +52,7 @@ class Button(tk.Canvas):
         self.transition = 0
         self.text, self.image, self.color = title, image, self.normal
         self.fg = "#ffffff" if primary else TEXT
-        self.font = tkfont.Font(font=(FONT, 9 if small else 10, "normal" if nav else "bold"))
+        self.font = tkfont.Font(root=self, font=(FONT, 9 if small else 10, "normal" if nav else "bold"))
         self.padx, self.pady = (12, 9) if nav else ((11, 5) if small else (16, 8))
         self.ready = True
         self.resize()
@@ -79,7 +79,8 @@ class Button(tk.Canvas):
         height = max(self.winfo_height(), int(super().cget("height")))
         if self.winfo_width() > 1:
             width = self.winfo_width()
-        round_rect(self, width, height, 9, self.color, ACCENT if self.focused else self.edge)
+        edge = (TEXT if self.primary else ACCENT) if self.focused else self.edge
+        round_rect(self, width, height, 9, self.color, edge, outside=super().cget("bg"))
         x = self.padx
         if self.image:
             self.create_image(x, height / 2, image=self.image, anchor="w")
@@ -166,22 +167,22 @@ def window_handle(window):
 TOUR = (
     ("Welcome to Model Bridge",
      "Model Bridge turns the ChatGPT and Claude subscriptions you already pay for into a local, "
-     "OpenAI-compatible API that any app on this PC can use. Setup takes about a minute."),
-    ("1  \u00b7  Connect an account",
+     "OpenAI-compatible API that any app on this computer can use. Setup takes about a minute."),
+    ("Connect an account",
      "On Overview, select Connect (or Install CLI) on ChatGPT or Claude. A sign-in window from the "
      "official CLI opens. Finish it there and the card turns green with your plan and models."),
-    ("2  \u00b7  Create an API key",
+    ("Create an API key",
      "Open API keys and select Create key. Name it after the app that will use it, such as Cursor. "
      "You can show or copy any key again later, and revoke it at any time."),
-    ("3  \u00b7  Start the local API",
+    ("Start the local API",
      "Back on Overview, select Start local API, then Copy URL. In your app, choose an OpenAI-compatible "
      "provider, paste the URL as the base URL and the key as the API key."),
-    ("4  \u00b7  Pick a model",
+    ("Pick a model",
      "Models lists every model your accounts can use. Select one, use Test model to confirm it answers, "
      "then Copy model ID into your app. You're all set."),
 )
 DEFAULT_PORT = 8765
-SETTINGS = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelBridge" / "settings.json"
+SETTINGS = data_directory() / "settings.json"
 
 
 def load_port():
@@ -206,7 +207,30 @@ def save_port(port):
         pass
 
 
-TOUR_FLAG = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ModelBridge" / "tour-complete"
+TOUR_FLAG = data_directory() / "tour-complete"
+
+
+def cut_out(box, hole):
+    """The parts of `box` that `hole` does not cover. Boxes are (left, top, right, bottom)."""
+    left, top = max(box[0], hole[0]), max(box[1], hole[1])
+    right, bottom = min(box[2], hole[2]), min(box[3], hole[3])
+    if left >= right or top >= bottom:
+        return [box]
+    pieces = ((box[0], box[1], box[2], top), (box[0], bottom, box[2], box[3]),
+              (box[0], top, left, bottom), (right, top, box[2], bottom))
+    return [piece for piece in pieces if piece[0] < piece[2] and piece[1] < piece[3]]
+
+
+def make_root():
+    root = tk.Tk()
+    if MACOS:
+        # Match Windows text sizing, and stay light when the system is in dark mode.
+        root.tk.call("tk", "scaling", 96 / 72)
+        try:
+            root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", ".", "aqua")
+        except tk.TclError:
+            pass
+    return root
 
 
 def label(parent, value="", size=11, color=TEXT, bold=False, **options):
@@ -245,7 +269,7 @@ class Desktop:
         root.minsize(980, 740)
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
-        if ICON.is_file():
+        if os.name == "nt" and ICON.is_file():
             root.iconbitmap(default=str(ICON))
         if os.name == "nt":
             try:
@@ -259,6 +283,9 @@ class Desktop:
                 style_title_bar(hwnd)
             except OSError:
                 pass
+        if MACOS:
+            root.createcommand("tk::mac::Quit", self.close)
+            root.createcommand("tk::mac::ReopenApplication", root.deiconify)
         self.setup_style()
         self.build_shell()
         self.build_overview()
@@ -346,7 +373,7 @@ class Desktop:
                              image=self.icons[button.icon + ("-active" if key == name else "")])
 
     def build_overview(self):
-        page = self.page("Overview", "Overview", "Connect your accounts and start the API on this PC.")
+        page = self.page("Overview", "Overview", "Connect your accounts and start the API on this computer.")
         grid = tk.Frame(page, bg=BG)
         grid.pack(fill="x")
         self.provider_grid = grid
@@ -400,7 +427,7 @@ class Desktop:
         frame = RoundFrame(parent, fill="#ffffff" if not read_only else "#f7f7f9", border=BORDER,
                            radius=9, padding=0)
         field = tk.Entry(frame.inner, textvariable=variable, state="readonly" if read_only else "normal",
-                         font=("Cascadia Mono" if mono else FONT, 10), bd=0,
+                         font=(MONO if mono else FONT, 10), bd=0,
                          bg=frame.fill, readonlybackground=frame.fill, fg=TEXT, insertbackground=TEXT,
                          relief="flat", highlightthickness=0, selectbackground="#d9d5fd",
                          selectforeground=TEXT)
@@ -464,6 +491,7 @@ class Desktop:
         self.filter.trace_add("write", lambda *_: self.render_models())
         row = tk.Frame(page, bg=BG)
         row.pack(fill="x", pady=(10, 0))
+        self.model_actions = row
         self.models_caption = label(row, "Loading model catalog…", 10, MUTED)
         self.models_caption.pack(side="left")
         self.test_button = Button(row, "Test model", self.test_model)
@@ -477,6 +505,7 @@ class Desktop:
                          "Create a separate local key for each client. Keys stay active across restarts.")
         bar = tk.Frame(page, bg=BG)
         bar.pack(fill="x")
+        self.keys_bar = bar
         self.key_caption = label(bar, "", 11, MUTED)
         self.key_caption.pack(side="left")
         Button(bar, "Create key", self.create_key, primary=True).pack(side="right")
@@ -494,7 +523,8 @@ class Desktop:
             "Each app that uses Model Bridge gets its own key, so you can revoke one without "
             "touching the others.", "Create key", self.create_key)
         self.shown = set()
-        label(page, "Hover a key to show, copy or revoke it. Keys are encrypted for your Windows account.",
+        label(page, "Hover a key to show, copy or revoke it. " + ("Keys are stored in your Keychain." if MACOS
+              else "Keys are encrypted for your Windows account."),
               10, MUTED).pack(fill="x", pady=(10, 0))
 
     @staticmethod
@@ -504,16 +534,13 @@ class Desktop:
         frame.columnconfigure(2, minsize=120)
         frame.columnconfigure(3, minsize=112)
 
-    def icon_button(self, parent, icon, command, tip):
+    def icon_button(self, parent, icon, command):
         button = tk.Label(parent, image=self.icons[icon], bg=parent.cget("bg"), cursor="hand2",
                           padx=6, pady=4)
         button.bind("<Button-1>", lambda _: command())
-        button.bind("<Enter>", lambda _: (button.configure(bg=BORDER), self.status_tip(tip)))
-        button.bind("<Leave>", lambda _: (button.configure(bg=button.master.cget("bg")), self.status_tip("")))
+        button.bind("<Enter>", lambda _: button.configure(bg=BORDER))
+        button.bind("<Leave>", lambda _: button.configure(bg=button.master.cget("bg")))
         return button
-
-    def status_tip(self, text):
-        self.key_tip.config(text=text) if hasattr(self, "key_tip") else None
 
     def key_row(self, digest, record):
         row = tk.Frame(self.key_rows, bg=PANEL, padx=16, pady=11)
@@ -523,15 +550,15 @@ class Desktop:
         label(row, record["name"], 10, bold=True).grid(row=0, column=0, sticky="w")
         shown = digest in self.shown
         label(row, self.key_text(digest, record), 10, TEXT if shown else MUTED,
-              font=("Cascadia Mono", 9)).grid(row=0, column=1, sticky="w", padx=(0, 12))
+              font=(MONO, 9)).grid(row=0, column=1, sticky="w", padx=(0, 12))
         label(row, record["date"], 10, MUTED).grid(row=0, column=2, sticky="w")
         actions = tk.Frame(row, bg=PANEL)
         actions.grid(row=0, column=3, sticky="e")
         if record.get("secret"):
             self.icon_button(actions, "row-eye-off" if shown else "row-eye",
-                             lambda: self.view_key(digest), "Hide key" if shown else "Show key").pack(side="left")
-            self.icon_button(actions, "row-copy", lambda: self.copy_key(digest), "Copy key").pack(side="left", padx=2)
-        self.icon_button(actions, "row-trash", lambda: self.revoke_key(digest), "Revoke key").pack(side="left")
+                             lambda: self.view_key(digest)).pack(side="left")
+            self.icon_button(actions, "row-copy", lambda: self.copy_key(digest)).pack(side="left", padx=2)
+        self.icon_button(actions, "row-trash", lambda: self.revoke_key(digest)).pack(side="left")
         widgets = [row, actions] + list(row.winfo_children()) + list(actions.winfo_children())
 
         def paint(color, visible):
@@ -655,31 +682,31 @@ class Desktop:
         return dialog, body
 
     def tour_targets(self):
-        return {0: None, 1: self.provider_grid, 2: self.keys_card, 3: self.api_card,
-                4: self.model_tree.card}
+        return {0: None, 1: self.provider_grid, 2: self.keys_bar, 3: self.api_card,
+                4: self.model_actions}
 
     def tour(self, step=0):
         if getattr(self, "tour_window", None) and self.tour_window.winfo_exists():
             return
         root = self.root
         shades = []
-        for _ in range(4):
+        for _ in range(9):
             shade = tk.Toplevel(root, bg="#0b0b16")
-            shade.overrideredirect(True)
+            shade.withdraw()
+            if MACOS:
+                try:
+                    root.tk.call("::tk::unsupported::MacWindowStyle", "style", shade, "plain", "none")
+                except tk.TclError:
+                    shade.overrideredirect(True)
+            else:
+                shade.overrideredirect(True)
             shade.transient(root)
-            shade.attributes("-alpha", 0.55)
+            shade.attributes("-alpha", 0.45)
             shade.bind("<Button-1>", lambda _: dialog.focus_set())
             shades.append(shade)
-        ring = tk.Toplevel(root, bg=ACCENT)
-        ring.overrideredirect(True)
-        ring.transient(root)
-        ring.attributes("-transparentcolor", "#010203")
-        tk.Frame(ring, bg="#010203").pack(fill="both", expand=True, padx=2, pady=2)
-        dialog = tk.Toplevel(root, bg=TOUR_KEY)
-        dialog.overrideredirect(True)
-        dialog.attributes("-transparentcolor", TOUR_KEY)
-        dialog.transient(root)
-        self.tour_window = dialog
+        ring = [tk.Frame(root, bg=ACCENT) for _ in range(4)]
+        # The card's corners blend into the shade around it.
+        dialog = self.tour_window = tk.Frame(root, bg=TOUR_SHADE, takefocus=True)
         shell = RoundFrame(dialog, fill=PANEL, radius=18, padding=26)
         shell.pack(fill="both", expand=True)
         body = shell.inner
@@ -702,7 +729,7 @@ class Desktop:
             except OSError:
                 pass
             root.unbind("<Configure>", binding)
-            for window in shades + [ring, dialog]:
+            for window in shades + ring + [dialog]:
                 window.destroy()
             root.focus_force()
 
@@ -713,45 +740,44 @@ class Desktop:
             left, top = root.winfo_rootx(), root.winfo_rooty()
             right, bottom = left + root.winfo_width(), top + root.winfo_height()
             target = self.tour_targets().get(state["step"])
+            width, height = (size + 2 * shell.inset for size in (body.winfo_reqwidth(), body.winfo_reqheight()))
+            holes = []
             if target is None:
-                rect = None
-                boxes = [(left, top, right, bottom)]
+                x, y = (left + right - width) // 2, (top + bottom - height) // 2
+                for edge in ring:
+                    edge.place_forget()
             else:
                 pad = 8
                 x0, y0 = target.winfo_rootx() - pad, target.winfo_rooty() - pad
                 x1, y1 = x0 + target.winfo_width() + 2 * pad, y0 + target.winfo_height() + 2 * pad
-                rect = (x0, y0, x1, y1)
-                boxes = [(left, top, right, y0), (left, y1, right, bottom),
-                         (left, y0, x0, y1), (x1, y0, right, y1)]
-            for shade, box in zip(shades, boxes + [None] * 4):
-                if box and box[2] > box[0] and box[3] > box[1]:
+                holes.append((x0, y0, x1, y1))
+                x = min(max(x0, left + 16), right - width - 16)
+                if y1 + 14 + height < bottom:
+                    y = y1 + 14
+                elif y0 - height - 14 > top:
+                    y = y0 - height - 14
+                else:
+                    x, y = x1 - width - 24, y1 - height - 24
+                for edge, (ex, ey, ew, eh) in zip(ring, (
+                        (x0, y0, x1 - x0, 2), (x0, y1 - 2, x1 - x0, 2),
+                        (x0, y0, 2, y1 - y0), (x1 - 2, y0, 2, y1 - y0))):
+                    edge.place(x=ex - left, y=ey - top, width=ew, height=eh)
+                    edge.lift()
+            holes.append((x, y, x + width, y + height))
+            dialog.place(x=x - left, y=y - top, width=width, height=height)
+            dialog.lift()
+            boxes = [(left, top, right, bottom)]
+            for hole in holes:
+                boxes = [piece for box in boxes for piece in cut_out(box, hole)]
+            for shade, box in zip(shades, boxes + [None] * len(shades)):
+                if box:
+                    # A mapped borderless window can ignore a move on Windows, so hide it first.
+                    shade.withdraw()
                     shade.geometry(f"{box[2]-box[0]}x{box[3]-box[1]}+{box[0]}+{box[1]}")
                     shade.deiconify()
                     shade.lift()
                 else:
                     shade.withdraw()
-            if rect:
-                ring.geometry(f"{rect[2]-rect[0]}x{rect[3]-rect[1]}+{rect[0]}+{rect[1]}")
-                ring.deiconify()
-                ring.lift()
-            else:
-                ring.withdraw()
-            dialog.update_idletasks()
-            width, height = dialog.winfo_reqwidth(), dialog.winfo_reqheight()
-            if rect is None:
-                x, y = (left + right - width) // 2, (top + bottom - height) // 2
-            else:
-                x = min(max(rect[0], left + 16), right - width - 16)
-                if rect[3] + 14 + height < bottom:
-                    y = rect[3] + 14
-                elif rect[1] - height - 14 > top:
-                    y = rect[1] - height - 14
-                else:
-                    x, y = right - width - 40, rect[3] - height - 24
-            dialog.withdraw()
-            dialog.geometry(f"{width}x{height}+{x}+{y}")
-            dialog.deiconify()
-            dialog.lift()
             dialog.focus_force()
 
         def show():
@@ -802,7 +828,7 @@ class Desktop:
                 return
             try:
                 token = self.store.create(text)
-            except OSError as exc:
+            except (OSError, subprocess.SubprocessError) as exc:
                 messagebox.showerror("Could not save key", str(exc), parent=dialog)
                 return
             dialog.destroy()
@@ -824,8 +850,8 @@ class Desktop:
         if digest in self.shown:
             try:
                 return self.store.reveal(digest) or "Unavailable"
-            except OSError:
-                return "Could not decrypt"
+            except (OSError, ValueError, subprocess.SubprocessError):
+                return "Could not read this key"
         if not record.get("secret"):
             return "mb_\u2022\u2022\u2022\u2022" + record["suffix"] + "   (older key, not viewable)"
         return "mb_" + "\u2022" * 12 + record["suffix"]
@@ -839,7 +865,7 @@ class Desktop:
     def copy_key(self, digest):
         try:
             token = self.store.reveal(digest)
-        except OSError:
+        except (OSError, ValueError, subprocess.SubprocessError):
             token = None
         if token:
             self.copy(token, f"Key for {self.store.keys[digest]['name']} copied.")
@@ -864,17 +890,20 @@ class Desktop:
     def install(self, provider):
         package = {"codex": "OpenAI.Codex", "claude": "Anthropic.ClaudeCode"}[provider]
         dialog, body = self.modal("Install " + PROVIDERS[provider][0],
-            "Windows will install the CLI in a terminal. Complete any installer prompts, "
+            "The CLI will install in a terminal window. Complete any installer prompts, "
             "then return here to sign in.")
         def launch():
-            script = (f"winget install --id {package} --exact --source winget; "
-                      "$result = $LASTEXITCODE; if ($result -ne 0) { "
-                      "Read-Host 'Installation failed. Press Enter to return' }; exit $result")
             try:
-                self.sign_in = subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-Command", script],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE)
-            except OSError as exc:
+                if MACOS:
+                    self.sign_in = macos.TerminalJob(macos.INSTALLERS[provider], search_path())
+                else:
+                    script = (f"winget install --id {package} --exact --source winget; "
+                              "$result = $LASTEXITCODE; if ($result -ne 0) { "
+                              "Read-Host 'Installation failed. Press Enter to return' }; exit $result")
+                    self.sign_in = subprocess.Popen(
+                        ["powershell.exe", "-NoProfile", "-Command", script],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE)
+            except (OSError, subprocess.SubprocessError) as exc:
                 messagebox.showerror("Could not open installer", str(exc), parent=dialog)
                 return
             dialog.destroy()
@@ -901,9 +930,12 @@ class Desktop:
         def begin():
             command = [executable, "login"] if provider == "codex" else [executable, "auth", "login"]
             try:
-                self.sign_in = subprocess.Popen(command, env=subscription_environment(),
-                    creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0)
-            except OSError as exc:
+                if MACOS:
+                    self.sign_in = macos.TerminalJob(shlex.join(command), search_path(), PROVIDER_VARIABLES)
+                else:
+                    self.sign_in = subprocess.Popen(command, env=subscription_environment(),
+                        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0)
+            except (OSError, subprocess.SubprocessError) as exc:
                 message.config(text=f"Could not open sign-in. {exc}", fg=DANGER)
                 return
             progress.pack(fill="x", pady=(0, 12), before=controls)
@@ -1038,7 +1070,7 @@ class Desktop:
         saved = load_port()
         for port in dict.fromkeys([saved, *range(DEFAULT_PORT, DEFAULT_PORT + 40)]):
             try:
-                self.server = HTTPServer(("127.0.0.1", port), Handler)
+                self.server = LocalServer(("127.0.0.1", port), Handler)
                 break
             except OSError:
                 continue
@@ -1109,7 +1141,7 @@ def main():
             messagebox.showinfo("Model Bridge", "Model Bridge is already open. Use its taskbar window.")
             root.destroy()
             return
-    root = tk.Tk()
+    root = make_root()
     try:
         Desktop(root)
     except (OSError, ValueError) as exc:

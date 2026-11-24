@@ -1,21 +1,43 @@
 """Local chat-completions adapter for the Codex and Claude Code CLIs."""
 
 import argparse
+import glob
 import hashlib
 import hmac
 import json
 import os
 import secrets
 import shutil
+import socketserver
 import subprocess
 import tempfile
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
+PROVIDER_VARIABLES = (
+    "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDECODE")
+
+
+def search_path():
+    """PATH, plus the usual CLI folders that apps opened from Finder do not inherit."""
+    folders = os.environ.get("PATH", "").split(os.pathsep)
+    if os.name != "nt":
+        home = os.path.expanduser("~")
+        folders += [home + suffix for suffix in (
+            "/.local/bin", "/.claude/local", "/.npm-global/bin", "/.volta/bin", "/.bun/bin",
+            "/.local/share/mise/shims", "/.asdf/shims")]
+        folders += ["/opt/homebrew/bin", "/usr/local/bin"]
+        folders += sorted(glob.glob(home + "/.nvm/versions/node/*/bin"), reverse=True)
+        folders += ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    return os.pathsep.join(dict.fromkeys(folder for folder in folders if folder))
+
+
 def executable_for(model):
     name = model + ".exe" if os.name == "nt" else model
-    path = shutil.which(name)
+    path = shutil.which(name, path=search_path())
     if not path and os.name == "nt":
         candidates = (
             os.path.expanduser("~/.local/bin/" + name),
@@ -29,10 +51,8 @@ def executable_for(model):
 
 def subscription_environment():
     env = os.environ.copy()
-    for name in ("OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY",
-                 "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
-                 "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
-                 "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDECODE"):
+    env["PATH"] = search_path()
+    for name in PROVIDER_VARIABLES:
         env.pop(name, None)
     return env
 
@@ -69,6 +89,16 @@ def ask(model, prompt, model_id=None):
             with open(output, encoding="utf-8") as answer:
                 return answer.read().strip()
         return result.stdout.strip()
+
+
+class LocalServer(HTTPServer):
+    # On Windows, address reuse would let two apps listen on the same port.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self):
+        # HTTPServer also looks up the host name, which can stall for seconds on macOS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -162,7 +192,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8765)
     options = parser.parse_args()
-    with HTTPServer(("127.0.0.1", options.port), Handler) as server:
+    with LocalServer(("127.0.0.1", options.port), Handler) as server:
         server.token = secrets.token_urlsafe(32)
         server.models = {"codex": ("codex", None), "claude": ("claude", None)}
         print(f"Base URL: http://127.0.0.1:{server.server_port}/v1", flush=True)

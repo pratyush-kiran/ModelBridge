@@ -1,7 +1,13 @@
 """Rounded, anti-aliased Tk widgets drawn on canvases (cards, buttons, pills, inputs)."""
 
+import sys
 import tkinter as tk
 from tkinter import font as tkfont
+
+MACOS = sys.platform == "darwin"
+FONT = "Helvetica Neue" if MACOS else "Segoe UI Variable Text"
+DISPLAY = "Helvetica Neue" if MACOS else "Segoe UI Variable Display"
+MONO = "Menlo" if MACOS else "Cascadia Mono"
 
 _CORNERS = {}
 
@@ -107,9 +113,9 @@ class RoundFrame(tk.Canvas):
 class Pill(tk.Canvas):
     """A small rounded status badge."""
 
-    def __init__(self, parent, text="", fg="#18181b", fill="#f2f2f5", font=("Segoe UI", 9, "bold")):
+    def __init__(self, parent, text="", fg="#18181b", fill="#f2f2f5", font=None):
         super().__init__(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0)
-        self.font = tkfont.Font(font=font)
+        self.font = tkfont.Font(root=self, font=font or (FONT, 9, "bold"))
         self.set(text, fg, fill)
 
     def set(self, text, fg, fill, dot=True):

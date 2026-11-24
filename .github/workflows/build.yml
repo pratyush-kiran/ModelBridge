@@ -1,0 +1,61 @@
+name: Build and test
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-15, chip: arm64 }
+          - { runner: macos-15-intel, chip: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install pyinstaller pillow
+      - name: Test the app
+        env:
+          MODEL_BRIDGE_SHOTS: shots
+        run: python3 -m unittest discover -s tests -v
+      - name: Build
+        run: bash build-macos.sh
+      - name: Open the built app the way a user would
+        run: |
+          mkdir -p shots unzipped
+          ditto -x -k dist/ModelBridge-macOS-${{ matrix.chip }}.zip unzipped
+          codesign --verify --deep --strict unzipped/ModelBridge.app
+          open unzipped/ModelBridge.app
+          sleep 20
+          screencapture -x shots/built-app.png || true
+          pgrep -fl ModelBridge.app/Contents/MacOS/ModelBridge
+          osascript -e 'quit app "ModelBridge"' || true
+          sleep 5
+          ! pgrep -f ModelBridge.app/Contents/MacOS/ModelBridge
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-${{ matrix.chip }}
+          path: shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ModelBridge-macOS-${{ matrix.chip }}
+          path: dist/ModelBridge-macOS-${{ matrix.chip }}.zip
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
