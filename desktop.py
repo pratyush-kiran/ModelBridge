@@ -182,7 +182,8 @@ TOUR = (
      "then Copy model ID into your app. You're all set."),
 )
 DEFAULT_PORT = 8765
-SHADE_MODE = os.environ.get("MODEL_BRIDGE_SHADE", "window")  # "off" skips dimming the page
+# Dimming uses see-through windows, which macOS draws unreliably, so there only the outline is used.
+SHADE_MODE = os.environ.get("MODEL_BRIDGE_SHADE", "off" if MACOS else "window")
 SETTINGS = data_directory() / "settings.json"
 
 
@@ -224,10 +225,16 @@ def cut_out(box, hole):
 
 def make_root():
     root = tk.Tk()
+    # Fit small screens: leave room for the menu bar, Dock and taskbar.
+    width = min(1140, root.winfo_screenwidth() - 60)
+    height = min(790, root.winfo_screenheight() - 120)
+    root.geometry(f"{width}x{height}")
+    root.minsize(min(980, width), min(740, height))
     if MACOS:
         # Match Windows text sizing, and stay light when the system is in dark mode.
         root.tk.call("tk", "scaling", 96 / 72)
         try:
+            root.update_idletasks()
             root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", ".", "aqua")
         except tk.TclError:
             pass
@@ -266,8 +273,6 @@ class Desktop:
         self.icons = {path.stem: tk.PhotoImage(master=root, file=str(path))
                       for path in (ICON.parent / "icons").glob("*.png")}
         self.icons["blank"] = tk.PhotoImage(master=root, width=18, height=18)
-        root.geometry("1140x790")
-        root.minsize(980, 740)
         root.configure(bg=BG)
         root.protocol("WM_DELETE_WINDOW", self.close)
         if os.name == "nt" and ICON.is_file():
@@ -754,9 +759,10 @@ class Desktop:
                     y = y0 - height - 14
                 else:
                     x, y = x1 - width - 24, y1 - height - 24
+                t = 2 if shades else 3
                 for edge, (ex, ey, ew, eh) in zip(ring, (
-                        (x0, y0, x1 - x0, 2), (x0, y1 - 2, x1 - x0, 2),
-                        (x0, y0, 2, y1 - y0), (x1 - 2, y0, 2, y1 - y0))):
+                        (x0, y0, x1 - x0, t), (x0, y1 - t, x1 - x0, t),
+                        (x0, y0, t, y1 - y0), (x1 - t, y0, t, y1 - y0))):
                     edge.place(x=ex - left, y=ey - top, width=ew, height=eh)
                     edge.lift()
             holes.append((x, y, x + width, y + height))

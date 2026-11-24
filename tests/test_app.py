@@ -116,6 +116,8 @@ class RealTerminalTest(unittest.TestCase):
         while job.poll() is None and time.monotonic() < deadline:
             time.sleep(0.3)
         self.assertEqual(job.returncode, 0)
+        # Close the window so that it does not cover the screenshots taken later.
+        subprocess.run(["osascript", "-e", 'tell application "Terminal" to quit saving no'], check=False, timeout=30)
 
 
 @unittest.skipUnless(POSIX, "the stand-in CLIs are shell scripts")

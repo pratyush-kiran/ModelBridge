@@ -91,6 +91,23 @@ app.navigate("Models")
 shot(root, "models-c-default-theme")
 root.destroy()
 
+# 2b. Hover over a key row with a real pointer move.
+root, app = make(False)
+store = app.store
+store.create("Cursor")
+app.render_keys()
+settle(root, 1.0)
+app.navigate("API keys")
+settle(root, 0.8)
+row = app.key_rows.winfo_children()[0]
+x, y = row.winfo_width() // 2, row.winfo_height() // 2
+row.event_generate("<Motion>", x=x, y=y, warp=True)
+settle(root, 0.5)
+row.event_generate("<Enter>", x=x, y=y)
+shot(root, "keys-hover")
+print("hover icons visible:", [str(c.cget("image")) for c in row.winfo_children()[-1].winfo_children()])
+root.destroy()
+
 # 3. Tour: separate shade windows versus none.
 for mode in ("window", "off"):
     desktop.SHADE_MODE = mode
