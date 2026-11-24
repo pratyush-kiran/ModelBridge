@@ -120,6 +120,28 @@ class RealTerminalTest(unittest.TestCase):
         subprocess.run(["osascript", "-e", 'tell application "Terminal" to quit saving no'], check=False, timeout=30)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "needs a real screen to photograph")
+class RealLoopDrawingTests(unittest.TestCase):
+    """macOS stops repainting some widgets under a real main loop, which update() hides."""
+
+    def dark_pixels(self, scenario, box):
+        from PIL import Image
+        folder = tempfile.mkdtemp()
+        subprocess.run([sys.executable, str(Path(__file__).with_name("diagnose_mainloop.py")), scenario, folder],
+                       check=True, timeout=120, capture_output=True)
+        picture = Image.open(Path(folder) / f"{scenario}-a.png").convert("L").crop(box)
+        return sum(1 for value in picture.getdata() if value < 110)
+
+    def test_models_page_is_drawn_after_returning_to_it(self):
+        self.assertGreater(self.dark_pixels("repack", (300, 90, 1000, 330)), 300)
+
+    def test_cards_are_drawn_with_the_tour_open(self):
+        self.assertGreater(self.dark_pixels("tour", (300, 130, 1000, 270)), 300)
+
+    def test_page_without_tour_is_drawn(self):
+        self.assertGreater(self.dark_pixels("notour", (300, 130, 1000, 270)), 300)
+
+
 @unittest.skipUnless(POSIX, "the stand-in CLIs are shell scripts")
 class CliTests(Base):
     def setUp(self):

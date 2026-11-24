@@ -40,6 +40,7 @@ class Button(tk.Canvas):
     def __init__(self, parent, title, command, primary=False, nav=False, image=None, small=False):
         self.ready = False
         self.focused = False
+        self.page_active = True
         super().__init__(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0,
                          cursor="hand2", takefocus=True)
         self.primary, self.nav = primary, nav
@@ -122,7 +123,8 @@ class Button(tk.Canvas):
     def state(self, enabled):
         self.enabled = bool(enabled)
         self.transition += 1
-        self.configure(cursor="hand2" if self.enabled else "arrow", takefocus=self.enabled,
+        self.configure(cursor="hand2" if self.enabled else "arrow",
+                       takefocus=self.enabled and self.page_active,
                        fg=("#ffffff" if self.primary else TEXT) if self.enabled else DISABLED,
                        bg=self.base() if self.enabled or not self.primary else "#c9c5f7")
 
@@ -359,24 +361,42 @@ class Desktop:
         self.toast.pack(side="bottom", fill="x", pady=(6, 0))
         self.host = tk.Frame(main, bg=BG)
         self.host.pack(fill="both", expand=True)
+        # Pages are stacked in one cell and the active one is raised. Hiding and re-showing a page
+        # with pack_forget leaves it blank on macOS.
+        self.host.grid_rowconfigure(0, weight=1)
+        self.host.grid_columnconfigure(0, weight=1)
         self.pages = {}
 
     def page(self, name, title, description):
         page = tk.Frame(self.host, bg=BG)
+        page.grid(row=0, column=0, sticky="nsew")
         self.pages[name] = page
         label(page, title, 22, bold=True).pack(fill="x")
         label(page, description, 11, MUTED).pack(fill="x", pady=(4, 18))
         return page
 
     def navigate(self, name):
-        for page in self.pages.values():
-            page.pack_forget()
-        self.pages[name].pack(fill="both", expand=True)
+        self.pages[name].tkraise()
+        for key, page in self.pages.items():
+            self.set_page_focus(page, key == name)
         for key, button in self.nav.items():
             button.active = key == name
             button.transition += 1
             button.configure(bg=button.base(), fg=ACCENT if key == name else MUTED,
                              image=self.icons[button.icon + ("-active" if key == name else "")])
+
+    @staticmethod
+    def set_page_focus(page, active):
+        """Keep Tab from landing on controls of pages that are stacked out of sight."""
+        stack = [page]
+        while stack:
+            widget = stack.pop()
+            stack.extend(widget.winfo_children())
+            if isinstance(widget, Button):
+                widget.page_active = active
+                widget.configure(takefocus=widget.enabled and active)
+            elif isinstance(widget, (tk.Entry, ttk.Treeview)):
+                widget.configure(takefocus="" if active else 0)
 
     def build_overview(self):
         page = self.page("Overview", "Overview", "Connect your accounts and start the API on this computer.")
