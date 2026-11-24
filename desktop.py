@@ -743,7 +743,8 @@ class Desktop:
             left, top = root.winfo_rootx(), root.winfo_rooty()
             right, bottom = left + root.winfo_width(), top + root.winfo_height()
             target = self.tour_targets().get(state["step"])
-            width, height = (size + 2 * shell.inset for size in (body.winfo_reqwidth(), body.winfo_reqheight()))
+            shell.update_idletasks()
+            width, height = shell.winfo_reqwidth(), shell.winfo_reqheight()
             holes = []
             if target is None:
                 x, y = (left + right - width) // 2, (top + bottom - height) // 2

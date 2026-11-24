@@ -77,37 +77,43 @@ def round_rect(canvas, width, height, radius, fill, border=None, outside=None, t
     canvas.tag_lower(tag)
 
 
-class RoundFrame(tk.Canvas):
-    """A rounded card. Put children in `.inner`. With expand=True the card fills its slot."""
+class RoundFrame(tk.Frame):
+    """A rounded card: a plain frame with rounded-corner images laid over its four corners.
+
+    Widgets embedded in a canvas stop repainting on macOS after their page is hidden and shown,
+    so the card itself holds the content. Put children in `.inner` (the card itself).
+    """
 
     def __init__(self, parent, fill="#ffffff", border=None, radius=14, padding=18, expand=False):
-        super().__init__(parent, bg=parent.cget("bg"), highlightthickness=0, bd=0, height=40)
-        self.fill, self.border, self.radius, self.padding, self.expand = fill, border, radius, padding, expand
-        # Inset the content so its square frame never covers the rounded corners.
-        self.inset = (1 if border else 0) + int(radius * 0.32) + 1
-        inner_pad = max(0, padding - self.inset)
-        self.inner = tk.Frame(self, bg=fill, padx=inner_pad, pady=inner_pad)
-        self.window = self.create_window(self.inset, self.inset, window=self.inner, anchor="nw")
-        self.bind("<Configure>", self._layout)
-        if not expand:
-            self.inner.bind("<Configure>", self._fit, add="+")
+        super().__init__(parent, bg=fill, bd=0, highlightthickness=1 if border else 0,
+                         highlightbackground=border or fill, highlightcolor=border or fill,
+                         padx=max(0, padding - (1 if border else 0)), pady=max(0, padding - (1 if border else 0)))
+        self.fill, self.border, self.radius = fill, border, radius
+        self.outside = parent.cget("bg")
+        self.inner = self
+        self.corners = []
+        for quadrant, anchor, x, y in (("tl", "nw", 0, 0), ("tr", "ne", 1, 0), ("bl", "sw", 0, 1), ("br", "se", 1, 1)):
+            piece = tk.Label(self, bd=0, highlightthickness=0, bg=self.outside)
+            piece.place(relx=x, rely=y, anchor=anchor, bordermode="outside")
+            piece.quadrant = quadrant
+            self.corners.append(piece)
+        self.paint()
+        self.bind("<Configure>", lambda _: self.lift_corners())
+        self.after(60, self.lift_corners)
 
-    def _fit(self, _=None):
-        height = self.inner.winfo_reqheight() + 2 * self.inset
-        if int(self.cget("height")) != height:
-            self.configure(height=height)
+    def paint(self):
+        for piece in self.corners:
+            piece.configure(image=corner(self, self.radius, self.fill, self.border, self.outside, piece.quadrant))
 
-    def _layout(self, event):
-        inset = self.inset
-        self.itemconfigure(self.window, width=max(1, event.width - 2 * inset))
-        if self.expand:
-            self.itemconfigure(self.window, height=max(1, event.height - 2 * inset))
-        round_rect(self, event.width, event.height, self.radius, self.fill, self.border)
+    def lift_corners(self):
+        # Children added after the corners would otherwise cover them.
+        for piece in self.corners:
+            piece.lift()
 
     def recolor(self, fill, border=None):
         self.fill, self.border = fill, border
-        self.inner.configure(bg=fill)
-        round_rect(self, self.winfo_width(), self.winfo_height(), self.radius, fill, border)
+        self.configure(bg=fill, highlightbackground=border or fill, highlightcolor=border or fill)
+        self.paint()
 
 
 class Pill(tk.Canvas):
