@@ -6,3 +6,6 @@ __pycache__/
 
 # Brand render scratch
 assets/brand/r/
+
+# Downloaded CI artifacts
+dist-mac*/
